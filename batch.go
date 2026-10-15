@@ -1,6 +1,9 @@
 package hearsay
 
-import "github.com/cirocosta/hearsay/before"
+import (
+	"github.com/cirocosta/hearsay/before"
+	"github.com/cirocosta/hearsay/internal/tree"
+)
 
 type action struct {
 	insert  bool
@@ -133,16 +136,68 @@ func (r *Rumors[T]) commit(actions []action) (before.Version, error) {
 	if !r.aliveLocked() {
 		return Version{}, ErrClosed
 	}
-	candidate := s.current.Load().tree
-	stamp := candidate.Latest()
-	for _, a := range actions {
-		stamp = stamp.Tick(s.party)
-		if a.insert {
-			candidate = candidate.Insert(stamp, a.payload)
-		} else {
-			candidate = candidate.Forget(a.version, stamp)
-		}
-	}
+	candidate := applyBatch(s.current.Load().tree, s.party, actions)
 	s.publishLocked(candidate)
 	return candidate.Latest(), nil
+}
+
+func applyBatch(
+	original tree.Tree[[]byte],
+	party *before.Party,
+	actions []action,
+) tree.Tree[[]byte] {
+	if len(actions) == 0 {
+		return original
+	}
+	if len(actions) == 1 {
+		stamp := original.Latest().Tick(party)
+		if actions[0].insert {
+			return original.Insert(stamp, actions[0].payload)
+		}
+		return original.Forget(actions[0].version, stamp)
+	}
+	candidate := original
+	for _, effect := range batchEffects(original, party, actions) {
+		if effect.insert {
+			candidate = candidate.Insert(effect.version, effect.payload)
+		} else if effect.existed {
+			candidate = candidate.Forget(effect.version, effect.stamp)
+		}
+	}
+	return candidate
+}
+
+type batchEffect struct {
+	version Version
+	stamp   Version
+	payload []byte
+	insert  bool
+	existed bool
+}
+
+func batchEffects(original tree.Tree[[]byte], party *before.Party, actions []action) []batchEffect {
+	stamp := original.Latest()
+	positions := make(map[tree.Path]int, len(actions))
+	effects := make([]batchEffect, 0, len(actions))
+	for _, a := range actions {
+		stamp = stamp.Tick(party)
+		version := a.version
+		if a.insert {
+			version = stamp
+		}
+		path := tree.Address(version)
+		index, exists := positions[path]
+		if !exists {
+			_, existed := original.Get(version)
+			index = len(effects)
+			positions[path] = index
+			effects = append(effects, batchEffect{existed: existed})
+		}
+		effect := &effects[index]
+		effect.version = version
+		effect.stamp = stamp
+		effect.payload = a.payload
+		effect.insert = a.insert
+	}
+	return effects
 }
