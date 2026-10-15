@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/cirocosta/hearsay/before"
+	public "github.com/cirocosta/hearsay/bookmark"
 	"github.com/cirocosta/hearsay/internal/cbor"
 )
 
@@ -128,6 +129,102 @@ func TestAlternateEnvelope(t *testing.T) {
 	r, err = Decode(frame([]byte{0x9f, 0xff}))
 	if err != nil || len(r.networks) != 0 {
 		t.Fatalf("indefinite payload: %v", err)
+	}
+}
+
+func TestRustTypedEnvelopeSpellings(t *testing.T) {
+	// Verified against Ciborium 0.2.2 with the original upstream Complete
+	// adapter in .agi.local/payload-depth/src/bin/bookmark-format.rs.
+	canonical := unhex(t, emptyFixture)
+	for _, tc := range []struct {
+		name   string
+		pos    int
+		insert []byte
+	}{
+		{"tagged-version", 4, []byte{0xc0}},
+		{"bignum-version", 4, []byte{0xc2, 0x41}},
+		{"tagged-envelope-array", 3, []byte{0xc0}},
+		{"tagged-hash", 5, []byte{0xc0}},
+		{"tagged-payload-bytes", 41, []byte{0xc0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := append(bytes.Clone(canonical[:tc.pos]), tc.insert...)
+			input = append(input, canonical[tc.pos:]...)
+			r, err := Decode(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(r.Encode(), canonical) {
+				t.Fatal("alternate spelling changed decoded record")
+			}
+		})
+	}
+	hash := canonical[7:39]
+	nested := append(bytes.Clone(canonical[:5]), 0x5f, 0x5f, 0x58, 0x20)
+	nested = append(nested, hash...)
+	nested = append(nested, 0xff, 0xff, 0xd8, 24, 0x5f, 0x5f, 0x41, 0x80, 0xff, 0xff)
+	if _, err := Decode(nested); err != nil {
+		t.Fatalf("nested segments: %v", err)
+	}
+	for _, payload := range [][]byte{{0x40}, {0xc0, 0x40}, {0x5f, 0x5f, 0x40, 0xff, 0xff}} {
+		if _, err := Decode(frame(payload)); err != nil {
+			t.Fatalf("empty byte sequence %x: %v", payload, err)
+		}
+	}
+	// Ignored tags and nested string segments do not consume typed recursion
+	// steps, so no generic structural depth limit applies to them.
+	deep := append(bytes.Clone(canonical[:4]), bytes.Repeat([]byte{0xc0}, 10000)...)
+	deep = append(deep, canonical[4:]...)
+	if _, err := Decode(deep); err != nil {
+		t.Fatalf("deep transparent tags: %v", err)
+	}
+	for _, pos := range []int{0, 39} {
+		wrong := append(bytes.Clone(canonical[:pos]), 0xc0)
+		wrong = append(wrong, canonical[pos:]...)
+		if _, err := Decode(wrong); !errors.Is(err, public.ErrNotBookmark) {
+			t.Fatalf("required boundary %d: %v", pos, err)
+		}
+	}
+}
+
+func TestPublicFormatErrors(t *testing.T) {
+	canonical := unhex(t, emptyFixture)
+	wrongVersion := bytes.Clone(canonical)
+	wrongVersion[4] = 5
+	wrongHash := bytes.Clone(canonical)
+	wrongHash[10] ^= 1
+	for _, tc := range []struct {
+		name  string
+		input []byte
+		kind  error
+		found uint64
+	}{
+		{"truncated", canonical[:5], public.ErrTruncated, 0},
+		{"not-bookmark", []byte{0x00}, public.ErrNotBookmark, 0},
+		{"version", wrongVersion, public.ErrVersion, 5},
+		{"checksum", wrongHash, public.ErrChecksum, 0},
+		{"record", frame([]byte{0x00}), public.ErrRecord, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Decode(tc.input)
+			if !errors.Is(err, tc.kind) {
+				t.Fatalf("kind: %v", err)
+			}
+			var detail *public.FormatError
+			if !errors.As(err, &detail) || detail.FoundVersion != tc.found {
+				t.Fatalf("details: %#v", detail)
+			}
+			if tc.kind == public.ErrTruncated && detail.Length != len(tc.input) {
+				t.Fatalf("length: %d", detail.Length)
+			}
+			if (tc.kind == public.ErrNotBookmark || tc.kind == public.ErrRecord) &&
+				detail.Err == nil {
+				t.Fatal("lost structural cause")
+			}
+			if detail.Error() == "" {
+				t.Fatal("empty diagnostic")
+			}
+		})
 	}
 }
 

@@ -4,26 +4,27 @@ import (
 	"crypto/sha3"
 	"crypto/subtle"
 	"errors"
-	"fmt"
+	"io"
 
 	"github.com/cirocosta/hearsay/before"
+	"github.com/cirocosta/hearsay/bookmark"
 	"github.com/cirocosta/hearsay/internal/cbor"
 )
 
 const (
 	// FormatVersion is the upstream on-disk bookmark format version.
-	FormatVersion uint64 = 6
+	FormatVersion uint64 = bookmark.FormatVersion
 	partyTag      uint64 = 0xd255
 	versionTag    uint64 = 0xd256
 )
 
 var (
 	// ErrVersion reports an unsupported bookmark format version.
-	ErrVersion = errors.New("bookmark: unsupported format version")
+	ErrVersion = bookmark.ErrVersion
 	// ErrChecksum reports corrupted or modified record bytes.
-	ErrChecksum = errors.New("bookmark: checksum mismatch")
+	ErrChecksum = bookmark.ErrChecksum
 	// ErrRecord reports invalid recovery record structure or atoms.
-	ErrRecord = errors.New("bookmark: invalid recovery record")
+	ErrRecord = bookmark.ErrRecord
 )
 
 func appendBytes(dst, value []byte) []byte {
@@ -83,27 +84,28 @@ func (r *Record) Encode() []byte {
 func Decode(input []byte) (*Record, error) {
 	version, hash, payload, err := envelope(input)
 	if err != nil {
-		return nil, err
+		kind := bookmark.ErrNotBookmark
+		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+			kind = bookmark.ErrTruncated
+		}
+		return nil, &bookmark.FormatError{Kind: kind, Length: len(input), Err: err}
 	}
 	if version != FormatVersion {
-		return nil, fmt.Errorf("%w: %d", ErrVersion, version)
+		return nil, &bookmark.FormatError{Kind: ErrVersion, FoundVersion: version}
 	}
 	want := checksum(version, payload)
 	if subtle.ConstantTimeCompare(hash, want[:]) != 1 {
-		return nil, ErrChecksum
+		return nil, &bookmark.FormatError{Kind: ErrChecksum}
 	}
 	r, err := decodePayload(payload)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrRecord, err)
+		return nil, &bookmark.FormatError{Kind: ErrRecord, Err: err}
 	}
 	return r, nil
 }
 
 func envelope(input []byte) (uint64, []byte, []byte, error) {
-	if err := cbor.ValidateItem(
-		input,
-		cbor.Limits{MaxBytes: max(1, len(input)), MaxItems: max(1, len(input))},
-	); err != nil {
+	if err := cbor.ValidateWellFormed(input); err != nil {
 		return 0, nil, nil, err
 	}
 	p := parser{input: input}
@@ -139,10 +141,7 @@ func envelope(input []byte) (uint64, []byte, []byte, error) {
 }
 
 func decodePayload(payload []byte) (*Record, error) {
-	if err := cbor.ValidateItem(
-		payload,
-		cbor.Limits{MaxBytes: max(1, len(payload)), MaxItems: max(1, len(payload))},
-	); err != nil {
+	if err := cbor.ValidateWellFormed(payload); err != nil {
 		return nil, err
 	}
 	p := parser{input: payload}

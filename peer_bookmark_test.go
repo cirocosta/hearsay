@@ -116,11 +116,13 @@ func TestBookmarkAttachFailurePreservesPeer(t *testing.T) {
 		t.Fatal(err)
 	}
 	storage := new(faultBookmark)
-	if err := storage.data.Store(t.Context(), []byte("malformed")); err != nil {
+	if err := storage.data.Store(t.Context(), []byte{0x00}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.AttachBookmark(t.Context(), storage); err == nil {
-		t.Fatal("accepted malformed bookmark")
+	attachmentErr := p.AttachBookmark(t.Context(), storage)
+	var formatErr *bookmark.FormatError
+	if !errors.Is(attachmentErr, bookmark.ErrNotBookmark) || !errors.As(attachmentErr, &formatErr) {
+		t.Fatalf("attachment lost public format diagnostics: %v", attachmentErr)
 	}
 	if p.state.bookmark != nil || !p.token.alive {
 		t.Fatal("attachment failure consumed peer")

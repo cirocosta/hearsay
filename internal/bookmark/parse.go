@@ -1,6 +1,7 @@
 package bookmark
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 
@@ -73,17 +74,45 @@ func (p *parser) tag(tag uint64) error {
 }
 
 func (p *parser) uint() (uint64, error) {
-	value, indefinite, err := p.want(cbor.MajorUint)
-	if indefinite {
-		return 0, cbor.ErrMalformed
+	for {
+		major, value, indefinite, err := p.head()
+		if err != nil {
+			return 0, err
+		}
+		if indefinite {
+			return 0, cbor.ErrMalformed
+		}
+		switch major {
+		case cbor.MajorUint:
+			return value, nil
+		case cbor.MajorTag:
+			switch value {
+			case 2:
+				return p.bigUint()
+			case 3:
+				return 0, cbor.ErrMajor
+			}
+		default:
+			return 0, cbor.ErrMajor
+		}
 	}
-	return value, err
 }
 
 func (p *parser) array() (int, error) {
-	count, indefinite, err := p.want(cbor.MajorArray)
+	start := p.pos
+	major, count, indefinite, err := p.untaggedHead()
 	if err != nil {
 		return 0, err
+	}
+	if major == cbor.MajorBytes {
+		// Ciborium presents byte strings to sequence visitors as u8 elements.
+		// Every element type here is a tagged tuple or atom, so only an empty
+		// byte string can represent one of these sequences successfully.
+		p.pos = start
+		return p.emptyByteSequence()
+	}
+	if major != cbor.MajorArray {
+		return 0, cbor.ErrMajor
 	}
 	if indefinite {
 		return -1, nil
@@ -92,6 +121,53 @@ func (p *parser) array() (int, error) {
 		return 0, io.ErrUnexpectedEOF
 	}
 	return int(count), nil
+}
+
+func (p *parser) untaggedHead() (byte, uint64, bool, error) {
+	major, value, indefinite, err := p.head()
+	for err == nil && major == cbor.MajorTag {
+		if indefinite {
+			return 0, 0, false, cbor.ErrMalformed
+		}
+		major, value, indefinite, err = p.head()
+	}
+	return major, value, indefinite, err
+}
+
+func (p *parser) bigUint() (uint64, error) {
+	start := p.pos
+	major, _, _, err := p.head()
+	if err != nil {
+		return 0, err
+	}
+	if major != cbor.MajorBytes {
+		return 0, cbor.ErrMajor
+	}
+	p.pos = start
+	raw, err := p.bytes()
+	if err != nil {
+		return 0, err
+	}
+	raw = bytes.TrimLeft(raw, "\x00")
+	if len(raw) > 8 {
+		return 0, cbor.ErrMajor
+	}
+	var value uint64
+	for _, digit := range raw {
+		value = value<<8 | uint64(digit)
+	}
+	return value, nil
+}
+
+func (p *parser) emptyByteSequence() (int, error) {
+	value, err := p.bytes()
+	if err != nil {
+		return 0, err
+	}
+	if len(value) != 0 {
+		return 0, cbor.ErrMajor
+	}
+	return 0, nil
 }
 
 func (p *parser) more(count, i int) bool {
@@ -119,65 +195,14 @@ func (p *parser) end(count, actual int) error {
 }
 
 func (p *parser) bytes() ([]byte, error) {
-	if p.pos == len(p.input) {
-		return nil, io.ErrUnexpectedEOF
-	}
-	if p.input[p.pos]>>5 == cbor.MajorArray {
-		return p.byteArray()
-	}
-	count, indefinite, err := p.want(cbor.MajorBytes)
+	n, err := cbor.ScanWellFormed(p.input[p.pos:])
 	if err != nil {
 		return nil, err
 	}
-	if !indefinite {
-		return p.take(count)
-	}
-	return p.byteChunks()
-}
-
-func (p *parser) byteArray() ([]byte, error) {
-	count, err := p.array()
+	value, err := cbor.DecodeByteString(p.input[p.pos : p.pos+n])
 	if err != nil {
 		return nil, err
 	}
-	out := []byte{}
-	for i := 0; p.more(count, i); i++ {
-		value, err := p.uint()
-		if err != nil {
-			return nil, err
-		}
-		if value > 255 {
-			return nil, cbor.ErrMalformed
-		}
-		out = append(out, byte(value))
-	}
-	return out, p.end(count, len(out))
-}
-
-func (p *parser) byteChunks() ([]byte, error) {
-	out := []byte{}
-	for p.more(-1, 0) {
-		count, indefinite, err := p.want(cbor.MajorBytes)
-		if err != nil {
-			return nil, err
-		}
-		if indefinite {
-			return nil, cbor.ErrMalformed
-		}
-		chunk, err := p.take(count)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, chunk...)
-	}
-	return out, p.end(-1, 0)
-}
-
-func (p *parser) take(count uint64) ([]byte, error) {
-	if count > uint64(len(p.input)-p.pos) {
-		return nil, io.ErrUnexpectedEOF
-	}
-	out := append([]byte{}, p.input[p.pos:p.pos+int(count)]...)
-	p.pos += int(count)
-	return out, nil
+	p.pos += n
+	return bytes.Clone(value), nil
 }
