@@ -14,6 +14,7 @@ import (
 	"github.com/cirocosta/hearsay/internal/reconcile"
 	"github.com/cirocosta/hearsay/internal/tree"
 	"github.com/cirocosta/hearsay/link"
+	"github.com/cirocosta/hearsay/observe"
 )
 
 // SessionStats records reconciliation traffic and work on this endpoint.
@@ -82,7 +83,8 @@ func (c *countedControl) Write(p []byte) (int, error) {
 
 type sessionWire struct {
 	*link.Session
-	control *countedControl
+	control     *countedControl
+	observation *observe.Session
 }
 
 func (s *sessionWire) Control() io.ReadWriteCloser { return s.control }
@@ -136,6 +138,7 @@ type BootstrapConfig[T any] struct {
 	settings      SynchronizationSettings
 	bookmark      *bootstrapBookmark
 	bookmarkLimit int
+	observers     observe.Attachment
 }
 
 // Bootstrap configures joining a network through any established peer.
@@ -189,7 +192,19 @@ func (b *BootstrapConfig[T]) joinSession(
 	ctx context.Context,
 	session *sessionWire,
 ) (peer *Peer[T], err error) {
+	session.observation = b.observers.Begin(observe.Bootstrap)
 	var content reconcile.Result
+	defer func() {
+		stats := content.Stats
+		stats.BytesSent += session.control.sent
+		stats.BytesReceived += session.control.received
+		finishWireObservation(
+			ctx,
+			session,
+			Gossiped{Converged: content.Tree.Latest(), Stats: stats},
+			err,
+		)
+	}()
 	remote, err := exchangePreamble(session, protocol.Preamble{})
 	if err != nil {
 		return nil, phaseError("preamble", err)
@@ -220,6 +235,7 @@ func (b *BootstrapConfig[T]) joinSession(
 	codec.PayloadDepthLimit = b.settings.PayloadDepthLimit
 	peer = newPeer(Network(remote.Network), donated, content.Tree, codec)
 	peer.state.settings = b.settings
+	peer.state.observers = b.observers
 	return peer, nil
 }
 
@@ -321,6 +337,12 @@ func (s *replica[T]) session(
 	carrier *sessionWire,
 	intent protocol.Intent,
 ) (result Gossiped, donated bool, err error) {
+	kind := observe.Gossip
+	if intent == protocol.Retire {
+		kind = observe.Retire
+	}
+	carrier.observation = s.observers.Begin(kind)
+	defer func() { finishWireObservation(ctx, carrier, result, err) }()
 	remote, err := exchangePreamble(
 		carrier,
 		protocol.Preamble{Network: protocol.Network(s.network), Intent: intent},
@@ -410,7 +432,7 @@ func (tx *sessionTransaction[T]) reconcile(ctx context.Context) (Gossiped, error
 
 func (tx *sessionTransaction[T]) transferIdentity(ctx context.Context) (*before.Party, error) {
 	if tx.remote.Intent == protocol.Retire {
-		return readParty(tx.carrier.Control())
+		return readObservedParty(tx.carrier)
 	}
 	if tx.intent == protocol.Retire || tx.fork != nil {
 		return nil, tx.donateIdentity(ctx)
@@ -442,7 +464,11 @@ func (tx *sessionTransaction[T]) donateIdentity(ctx context.Context) error {
 		s.mu.Unlock()
 		tx.reserved = false
 	}
-	return writeItem(tx.carrier.Control(), wire)
+	err = writeItem(tx.carrier.Control(), wire)
+	if err == nil {
+		tx.carrier.observation.ControlSent(wire)
+	}
+	return err
 }
 
 func (tx *sessionTransaction[T]) publish(content tree.Tree[[]byte], absorbed *before.Party) error {
@@ -504,6 +530,7 @@ func runContent[T any](
 		remote,
 		reconcile.Options{
 			MemoryBudget: settings.SyncMemoryBudget,
+			Observer:     carrier.observation,
 			Admit: func(p []byte) error {
 				_, err := codec.DecodeBounded(bytes.Clone(p), settings.PayloadDepthLimit)
 				return err
@@ -553,12 +580,15 @@ func exchangeItem[T any](
 	writeDone := make(chan error, 1)
 	go func() {
 		err := writeItem(carrier.Control(), out)
+		if err == nil {
+			carrier.observation.ControlSent(out)
+		}
 		if err != nil {
 			_ = carrier.Abort(err)
 		}
 		writeDone <- err
 	}()
-	value, readErr := read(carrier.Control())
+	value, readErr := readObservedItem(carrier, read)
 	if readErr != nil {
 		_ = carrier.Abort(readErr)
 	}
@@ -638,7 +668,7 @@ func receiveBootstrapParty(carrier *sessionWire, network protocol.Network) (*bef
 	if network.IsBootstrap() {
 		return nil, nil
 	}
-	return readParty(carrier.Control())
+	return readObservedParty(carrier)
 }
 
 func (b *BootstrapConfig[T]) validCodec() bool {

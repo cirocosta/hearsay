@@ -17,6 +17,7 @@ import (
 	"github.com/cirocosta/hearsay/before"
 	"github.com/cirocosta/hearsay/internal/cbor"
 	"github.com/cirocosta/hearsay/internal/tree"
+	"github.com/cirocosta/hearsay/observe"
 )
 
 // Version identifies an event and its causal past. Its zero value is empty.
@@ -152,6 +153,7 @@ type replica[T any] struct {
 	reservations  uint64
 	bookmark      *peerBookmark
 	bookmarkLimit int
+	observers     observe.Attachment
 	done          chan struct{}
 	ended         bool
 }
