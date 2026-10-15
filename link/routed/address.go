@@ -1,5 +1,6 @@
 // Package routed adapts dial/listen transports into independent gossip streams.
-// Each link uses one persistent control connection and fresh data connections.
+// Each link uses one persistent control connection and independent data
+// connections. Explicit clean completion permits bounded READY-confirmed reuse.
 // Routing tokens identify links; they do not authenticate or authorize peers.
 // The supplied transport must provide the security required by the deployment.
 package routed

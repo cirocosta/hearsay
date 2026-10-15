@@ -15,13 +15,17 @@ import (
 // Calls may run concurrently. The implementation must honor cancellation.
 type Dial func(context.Context, []byte) (net.Conn, error)
 
-// Config bounds routing work. Zero queue limits select the defaults.
+// Config bounds routing work and controls outgoing connection reuse.
+// Zero queue limits select the defaults.
 // RoutingTimeout applies only to initial headers and acknowledgements.
 // A zero timeout leaves routing attempts untimed, bounded by PendingHeaders.
 type Config struct {
 	PendingHeaders int
 	PendingLinks   int
 	RoutingTimeout time.Duration
+	// DisablePooling forces fresh outgoing connections. Incoming clean streams
+	// still support READY reuse requested by the peer. Zero enables reuse.
+	DisablePooling bool
 }
 
 // Info describes a routed link. Peer is a copy of the remote advertised name.
@@ -38,7 +42,7 @@ type Stats struct {
 
 // Endpoint owns a listener and routes each accepted connection by link token.
 // New starts its bounded router. Close terminates all links and waits for the
-// router to exit. Established data connections are not pooled or reused.
+// router to exit. Completed data connections use bounded per-link reuse pools.
 type Endpoint struct {
 	listener        net.Listener
 	dial            Dial
@@ -274,16 +278,17 @@ func (e *Endpoint) Link(ctx context.Context, peer []byte) (Info, *Link, error) {
 		return Info{}, nil, net.ErrClosed
 	}
 	conn = tracked
-	stop := context.AfterFunc(ctx, func() { e.closeConn(conn) })
-	defer stop()
+	disarm := closeOnCancellation(ctx, func() { e.closeConn(conn) })
 	l := newLink(e, conn, token, peer)
 	if !e.register(l) {
+		disarm()
 		_ = l.Close()
 		return Info{}, nil, net.ErrClosed
 	}
 	if err = writeHeader(conn, kindLink, token, e.address); err == nil {
 		err = readACK(conn)
 	}
+	disarm()
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		err = ctxErr
 	}

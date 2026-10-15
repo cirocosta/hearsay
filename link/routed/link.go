@@ -14,17 +14,21 @@ import (
 // Closing its control stream closes the link. Close terminates its pending
 // opens, accepts, and all active streams without affecting other links.
 type Link struct {
-	endpoint *Endpoint
-	token    Token
-	peer     []byte
-	control  *control
-	ctx      context.Context
-	cancel   context.CancelFunc
-	mu       sync.Mutex
-	closed   bool
-	changed  chan struct{}
-	queue    []net.Conn
-	conns    map[net.Conn]struct{}
+	endpoint     *Endpoint
+	token        Token
+	peer         []byte
+	control      *control
+	ctx          context.Context
+	cancel       context.CancelFunc
+	mu           sync.Mutex
+	closed       bool
+	changed      chan struct{}
+	queue        []net.Conn
+	conns        map[net.Conn]struct{}
+	idle         []*outgoingConn
+	incomingIdle int
+	workers      sync.WaitGroup
+	shutdownDone chan struct{}
 }
 
 var _ link.Link = (*Link)(nil)
@@ -32,13 +36,14 @@ var _ link.Link = (*Link)(nil)
 func newLink(e *Endpoint, conn net.Conn, token Token, peer []byte) *Link {
 	ctx, cancel := context.WithCancel(e.ctx)
 	l := &Link{
-		endpoint: e,
-		token:    token,
-		peer:     append([]byte(nil), peer...),
-		ctx:      ctx,
-		cancel:   cancel,
-		changed:  make(chan struct{}),
-		conns:    map[net.Conn]struct{}{conn: {}},
+		endpoint:     e,
+		token:        token,
+		peer:         append([]byte(nil), peer...),
+		ctx:          ctx,
+		cancel:       cancel,
+		changed:      make(chan struct{}),
+		conns:        map[net.Conn]struct{}{conn: {}},
+		shutdownDone: make(chan struct{}),
 	}
 	l.control = &control{Conn: conn, link: l}
 	return l
@@ -49,16 +54,6 @@ func (l *Link) Info() Info { return Info{Token: l.token, Peer: append([]byte(nil
 
 // Control returns the persistent duplex control stream.
 func (l *Link) Control() io.ReadWriteCloser { return l.control }
-
-func (l *Link) add(conn net.Conn) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.closed {
-		return false
-	}
-	l.conns[conn] = struct{}{}
-	return true
-}
 
 var errStreamOverflow = errors.New("incoming stream limit exceeded")
 
@@ -78,8 +73,8 @@ func (l *Link) deliver(conn net.Conn) error {
 	return nil
 }
 
-// Open dials a fresh outgoing connection. Closing the returned writer delivers
-// accepted bytes followed by EOF; it never returns a connection to a pool.
+// Open takes a READY-confirmed connection without waiting, or dials a fresh
+// independent connection. Complete allows reuse; Close aborts the stream.
 func (l *Link) Open(ctx context.Context) (io.WriteCloser, error) {
 	child, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -88,23 +83,13 @@ func (l *Link) Open(ctx context.Context) (io.WriteCloser, error) {
 	if err := child.Err(); err != nil {
 		return nil, err
 	}
-	conn, err := l.endpoint.dial(child, append([]byte(nil), l.peer...))
+	conn, outgoing, err := l.openConnection(child)
 	if err != nil {
 		return nil, err
 	}
-	tracked, ok := l.endpoint.track(conn)
-	if !ok {
-		_ = conn.Close()
-		return nil, net.ErrClosed
-	}
-	conn = tracked
-	stop := context.AfterFunc(child, func() { l.endpoint.closeConn(conn) })
-	defer stop()
-	if !l.add(conn) {
-		l.endpoint.closeConn(conn)
-		return nil, net.ErrClosed
-	}
+	disarm := closeOnCancellation(child, func() { l.endpoint.closeConn(conn) })
 	err = writeHeader(conn, kindStream, l.token, nil)
+	disarm()
 	if ctxErr := child.Err(); ctxErr != nil {
 		err = ctxErr
 	}
@@ -112,7 +97,28 @@ func (l *Link) Open(ctx context.Context) (io.WriteCloser, error) {
 		l.release(conn)
 		return nil, err
 	}
-	return &writer{stream: &stream{Conn: conn, link: l}}, nil
+	return &writer{stream: &stream{Conn: conn, link: l}, outgoing: outgoing}, nil
+}
+
+func (l *Link) openConnection(ctx context.Context) (net.Conn, *outgoingConn, error) {
+	if outgoing := l.takeReady(); outgoing != nil {
+		return outgoing.conn, outgoing, nil
+	}
+	conn, err := l.endpoint.dial(ctx, append([]byte(nil), l.peer...))
+	if err != nil {
+		return nil, nil, err
+	}
+	tracked, ok := l.endpoint.track(conn)
+	if !ok {
+		_ = conn.Close()
+		return nil, nil, net.ErrClosed
+	}
+	outgoing, ok := l.prepareOutgoing(tracked)
+	if !ok {
+		l.endpoint.closeConn(tracked)
+		return nil, nil, net.ErrClosed
+	}
+	return tracked, outgoing, nil
 }
 
 // Accept yields a peer stream without assuming any ordering across streams.
@@ -148,15 +154,16 @@ func (l *Link) release(conn net.Conn) {
 	l.endpoint.closeConn(conn)
 	l.mu.Lock()
 	delete(l.conns, conn)
+	l.removeIdle(conn)
 	l.mu.Unlock()
 }
 
-// Close terminates the link and removes its routing registration.
-func (l *Link) Close() error {
+// shutdown revokes routing and interrupts every connection without joining.
+func (l *Link) shutdown() {
 	l.mu.Lock()
 	if l.closed {
 		l.mu.Unlock()
-		return nil
+		return
 	}
 	l.closed = true
 	l.cancel()
@@ -167,6 +174,7 @@ func (l *Link) Close() error {
 	}
 	l.conns = nil
 	l.queue = nil
+	l.idle = nil
 	l.mu.Unlock()
 	l.endpoint.mu.Lock()
 	if l.endpoint.links[l.token] == l {
@@ -176,6 +184,14 @@ func (l *Link) Close() error {
 	for _, c := range conns {
 		l.endpoint.closeConn(c)
 	}
+	close(l.shutdownDone)
+}
+
+// Close terminates the link and joins its bounded reuse workers.
+func (l *Link) Close() error {
+	l.shutdown()
+	<-l.shutdownDone
+	l.workers.Wait()
 	return nil
 }
 
@@ -196,7 +212,10 @@ func (s *stream) Close() error { s.once.Do(func() { s.link.release(s.Conn) }); r
 
 type (
 	reader struct{ *stream }
-	writer struct{ *stream }
+	writer struct {
+		*stream
+		outgoing *outgoingConn
+	}
 )
 
 func flushConnection(conn net.Conn) error { return link.Flush(conn) }
