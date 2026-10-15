@@ -130,25 +130,29 @@ func phaseError(phase string, err error) error {
 }
 
 // BootstrapConfig retains payload and synchronization settings across retries.
-// Copies can make independent join attempts.
+// Copies can make independent attempts when no bookmark storage is attached.
 type BootstrapConfig[T any] struct {
-	codec    Codec[T]
-	settings SynchronizationSettings
+	codec         Codec[T]
+	settings      SynchronizationSettings
+	bookmark      *bootstrapBookmark
+	bookmarkLimit int
 }
 
 // Bootstrap configures joining a network through any established peer.
 func Bootstrap[T any](codec Codec[T]) *BootstrapConfig[T] {
 	return &BootstrapConfig[T]{
-		codec:    codec,
-		settings: defaultSettings(codec.PayloadDepthLimit),
+		codec:         codec,
+		settings:      defaultSettings(codec.PayloadDepthLimit),
+		bookmarkLimit: DefaultBookmarkSizeLimit,
 	}
 }
 
 // Joined returns either a live peer or the configuration for another attempt.
 // A nil error with Retry set means both endpoints were bootstrapping.
 type Joined[T any] struct {
-	Peer  *Peer[T]
-	Retry *BootstrapConfig[T]
+	Peer          *Peer[T]
+	Retry         *BootstrapConfig[T]
+	BookmarkError error
 }
 
 // Join receives the provider's content and identity. It exposes a new peer only
@@ -159,6 +163,11 @@ func (b *BootstrapConfig[T]) Join(ctx context.Context, carrier *link.Managed) (J
 	if !b.validCodec() {
 		return retry, ErrCodec
 	}
+	if err := b.beginBookmarkJoin(); err != nil {
+		return retry, err
+	}
+	joinedSuccessfully := false
+	defer func() { b.finishBookmarkJoin(joinedSuccessfully) }()
 	session, err := beginSession(ctx, carrier)
 	if err != nil {
 		return retry, err
@@ -171,7 +180,9 @@ func (b *BootstrapConfig[T]) Join(ctx context.Context, carrier *link.Managed) (J
 	if peer == nil {
 		return retry, nil
 	}
-	return Joined[T]{Peer: peer}, nil
+	joinedSuccessfully = true
+	bookmarkErr := b.attachJoinedBookmark(ctx, peer)
+	return Joined[T]{Peer: peer, BookmarkError: bookmarkErr}, nil
 }
 
 func (b *BootstrapConfig[T]) joinSession(
@@ -331,22 +342,27 @@ func (s *replica[T]) session(
 		)
 	}
 	tx := &sessionTransaction[T]{state: s, carrier: carrier, intent: intent, remote: remote}
-	tx.prepare()
+	if err = tx.prepare(ctx); err != nil {
+		return Gossiped{}, false, phaseError("checkpoint", err)
+	}
 	defer tx.recoverFork()
 	result, err = tx.reconcile(ctx)
 	return result, tx.donated, err
 }
 
-func (tx *sessionTransaction[T]) prepare() {
-	s := tx.state
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	tx.prior = s.current.Load().tree
-	if tx.remote.Network.IsBootstrap() && tx.intent != protocol.Retire {
-		tx.fork = s.party.Fork()
-		s.reservations++
-		tx.reserved = true
+func (tx *sessionTransaction[T]) prepare(ctx context.Context) error {
+	prior, fork, err := tx.state.prepareSession(
+		ctx,
+		tx.remote.Network.IsBootstrap(),
+		tx.intent == protocol.Retire,
+	)
+	if err != nil {
+		return err
 	}
+	tx.prior = prior
+	tx.fork = fork
+	tx.reserved = fork != nil
+	return nil
 }
 
 func (tx *sessionTransaction[T]) recoverFork() {
@@ -402,7 +418,7 @@ func (tx *sessionTransaction[T]) transferIdentity(ctx context.Context) (*before.
 	return nil, nil
 }
 
-func (tx *sessionTransaction[T]) donateIdentity(_ context.Context) error {
+func (tx *sessionTransaction[T]) donateIdentity(ctx context.Context) error {
 	s := tx.state
 	s.mu.Lock()
 	party := s.party
@@ -410,6 +426,9 @@ func (tx *sessionTransaction[T]) donateIdentity(_ context.Context) error {
 		party = tx.fork
 	}
 	s.mu.Unlock()
+	if err := s.donateBookmark(ctx, party); err != nil {
+		return err
+	}
 	wire, err := encodeParty(party)
 	if err != nil {
 		return err
@@ -439,7 +458,12 @@ func (tx *sessionTransaction[T]) publish(content tree.Tree[[]byte], absorbed *be
 	return nil
 }
 
-func (tx *sessionTransaction[T]) complete(_ context.Context) error {
+func (tx *sessionTransaction[T]) complete(ctx context.Context) error {
+	if tx.remote.Intent == protocol.Retire {
+		if err := tx.state.checkpointBookmark(ctx); err != nil {
+			return phaseError("bookmark", err)
+		}
+	}
 	return phaseError("completion", completeSession(tx.carrier))
 }
 
