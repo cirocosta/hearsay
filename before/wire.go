@@ -361,17 +361,6 @@ func attachVersion(stack *[]versionFrame, n *event) (*event, error) {
 	return n, nil
 }
 
-func (r *bitReader) end() error {
-	end, err := r.padding()
-	if err != nil {
-		return err
-	}
-	if end != len(r.data) {
-		return ErrTrailingData
-	}
-	return nil
-}
-
 type heightReader struct {
 	previous count
 	first    bool
@@ -394,23 +383,32 @@ func (h *heightReader) read(r *bitReader) (count, error) {
 // DecodeVersion validates exactly one canonical version, including arbitrary
 // precision counts, nonnegative heights, topology and marker padding.
 func DecodeVersion(data []byte) (Version, error) {
+	v, end, err := decodeVersionPrefix(data)
+	if err != nil {
+		return Version{}, err
+	}
+	if end != len(data) {
+		return Version{}, ErrTrailingData
+	}
+	return v, nil
+}
+
+func decodeVersionPrefix(data []byte) (Version, int, error) {
 	r := bitReader{data: data}
 	var stack []versionFrame
 	h := heightReader{first: true}
 	for {
 		n, err := r.versionLeaf(&stack, &h)
 		if err != nil {
-			return Version{}, err
+			return Version{}, 0, err
 		}
 		n, err = attachVersion(&stack, n)
 		if err != nil {
-			return Version{}, err
+			return Version{}, 0, err
 		}
 		if n != nil {
-			if err := r.end(); err != nil {
-				return Version{}, err
-			}
-			return Version{root: n}, nil
+			end, err := r.padding()
+			return Version{root: n}, end, err
 		}
 	}
 }
