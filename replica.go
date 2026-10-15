@@ -334,17 +334,16 @@ func (r *Rumors[T]) IntoPeer(ctx context.Context) (*Peer[T], error) {
 	select {
 	case <-done:
 	case <-ctx.Done():
-		s.mu.Lock()
-		r.generation.waiters--
-		if r.generation.refs == 0 && r.generation.waiters == 0 && !r.generation.claimed {
-			s.finishLocked()
-		}
-		s.mu.Unlock()
-		return nil, ctx.Err()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r.generation.waiters--
+	if err := ctx.Err(); err != nil {
+		if r.generation.refs == 0 && r.generation.waiters == 0 && !r.generation.claimed {
+			s.finishLocked()
+		}
+		return nil, err
+	}
 	return r.claimLocked()
 }
 
