@@ -54,16 +54,15 @@ bootstrap, message exchange, and redaction.
 provide `Encode` and `DecodeBounded`, including typed recursion enforcement.
 Equality defaults to `reflect.DeepEqual`; override `Equal` when needed.
 
+`SynchronizationSettings.SyncMemoryBudget` targets pending comparison metadata.
+It permits a one-item progress floor and does not cap total process memory.
+Payloads, snapshots, replies, and transport buffers have separate ownership.
+
 ## Development
 
 ```sh
 make check    # tests, race detector, vet, and golangci-lint v2
 make bench    # local and network-model benchmarks
-make interop  # Rust-Go compatibility checks; requires Rust and initial network access
 ```
-
-See [PERFORMANCE.md](PERFORMANCE.md) for measurements and memory-budget limits,
-[PORTING.md](PORTING.md) for the compatibility contract, and
-[interop/README.md](interop/README.md) for verifier setup.
 
 Hearsay is inspired by Oxide's [rumors](https://github.com/oxidecomputer/rumors).

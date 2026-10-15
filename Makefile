@@ -1,4 +1,4 @@
-.PHONY: test race vet lint fmt check bench interop
+.PHONY: test race vet lint fmt check bench
 
 test:
 	go test ./...
@@ -19,6 +19,3 @@ check: test race vet lint
 
 bench:
 	go test -run='^$$' -bench=. -benchmem ./...
-
-interop:
-	./interop/run.sh
