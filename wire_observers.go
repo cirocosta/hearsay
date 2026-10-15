@@ -8,6 +8,7 @@ import (
 
 	"github.com/cirocosta/hearsay/before"
 	"github.com/cirocosta/hearsay/internal/protocol"
+	"github.com/cirocosta/hearsay/internal/sessionerr"
 	"github.com/cirocosta/hearsay/observe"
 )
 
@@ -71,12 +72,19 @@ func finishWireObservation(ctx context.Context, carrier *sessionWire, result Gos
 }
 
 func wireFailure(err error) observe.FailureKind {
-	if errors.Is(err, protocol.ErrNetwork) || errors.Is(err, protocol.ErrDepth) {
-		return observe.MismatchFailure
-	}
 	var phase *SessionError
 	if errors.As(err, &phase) && (phase.Phase == "bookmark" || phase.Phase == "checkpoint") {
 		return observe.BookmarkFailure
+	}
+	switch sessionerr.Diagnostic(err).(type) {
+	case *ProtocolViolation, *sessionerr.ProtocolFailure:
+		return observe.ProtocolFailure
+	case *TransportError, *sessionerr.IOFailure:
+		return observe.TransportFailure
+	}
+	if errors.Is(err, protocol.ErrNetwork) || errors.Is(err, protocol.ErrDepth) ||
+		errors.Is(err, protocol.ErrProtocol) {
+		return observe.MismatchFailure
 	}
 	var transport net.Error
 	if errors.As(err, &transport) || errors.Is(err, io.EOF) ||

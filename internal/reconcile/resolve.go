@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/cirocosta/hearsay/internal/protocol"
+	"github.com/cirocosta/hearsay/internal/sessionerr"
 	"github.com/cirocosta/hearsay/internal/tree"
 )
 
@@ -34,15 +35,18 @@ func (e *engine) resolve(q pending, depth int, stream uint8) error {
 	for {
 		frame, err := e.streams.receive(stream)
 		if err != nil {
-			return err
+			return e.streams.incomingError(int(stream), err)
 		}
 		ended, err := e.react(state, frame, depth)
 		if err != nil {
-			return err
+			return e.streams.incomingError(int(stream), err)
 		}
 		if ended {
 			if state.cursor != len(q.fan) {
-				return fmt.Errorf("%w: unanswered held child", ErrReply)
+				return e.streams.incomingError(
+					int(stream),
+					fmt.Errorf("%w: unanswered held child", ErrReply),
+				)
 			}
 			return nil
 		}
@@ -157,7 +161,7 @@ func (e *engine) absorbRun(state *replyState, run protocol.LeafRun) error {
 	for {
 		record, ok, err := iterator.Next()
 		if err != nil {
-			return err
+			return sessionerr.Protocol(err)
 		}
 		if !ok {
 			return nil
@@ -196,7 +200,7 @@ func (e *engine) absorbRecord(state *replyState, record protocol.Record) error {
 
 func (e *engine) admitPayload(payload []byte) error {
 	if e.options.Admit != nil {
-		return e.options.Admit(payload)
+		return sessionerr.Protocol(e.options.Admit(payload))
 	}
 	return nil
 }
@@ -231,7 +235,7 @@ func (e *engine) receiveEarly() error {
 		}
 		ended, err := e.earlyFrame(state, frame)
 		if err != nil {
-			return err
+			return e.streams.incomingError(0, err)
 		}
 		if ended {
 			return e.streams.finishReceive(0)

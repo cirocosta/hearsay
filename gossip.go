@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/cirocosta/hearsay/internal/cbor"
 	"github.com/cirocosta/hearsay/internal/protocol"
 	"github.com/cirocosta/hearsay/internal/reconcile"
+	"github.com/cirocosta/hearsay/internal/sessionerr"
 	"github.com/cirocosta/hearsay/internal/tree"
 	"github.com/cirocosta/hearsay/link"
 	"github.com/cirocosta/hearsay/observe"
@@ -40,7 +40,8 @@ func (c *replayControl) Read(p []byte) (int, error) {
 		return n, nil
 	}
 
-	return c.ReadWriteCloser.Read(p)
+	n, err := c.ReadWriteCloser.Read(p)
+	return n, sessionerr.IO(sessionerr.Read, err)
 }
 
 func (c *replayControl) watch(ctx context.Context, carrier *sessionWire) func() error {
@@ -54,6 +55,7 @@ func (c *replayControl) watch(ctx context.Context, carrier *sessionWire) func() 
 			ahead = append(ahead, buffer[:n]...)
 			if err != nil {
 				if watchCtx.Err() == nil {
+					err = sessionerr.IO(sessionerr.Read, err)
 					_ = carrier.Abort(err)
 				} else {
 					err = nil
@@ -104,22 +106,6 @@ type Gossiped struct {
 	Stats     SessionStats
 	// Elapsed mirrors Stats.Elapsed for the full session.
 	Elapsed time.Duration
-}
-
-// SessionError identifies the phase that failed. Completion errors can follow
-// a successful local commit; they do not roll that commit back.
-type SessionError struct {
-	Phase string
-	Err   error
-}
-
-func (e *SessionError) Error() string { return fmt.Sprintf("hearsay %s: %v", e.Phase, e.Err) }
-func (e *SessionError) Unwrap() error { return e.Err }
-func phaseError(phase string, err error) error {
-	if err == nil {
-		return nil
-	}
-	return &SessionError{phase, err}
 }
 
 // BootstrapConfig retains payload and synchronization settings across retries.
@@ -516,7 +502,15 @@ func runContent[T any](
 		return reconcile.Result{}, phaseError("greeting", err)
 	}
 	if err = protocol.ValidateNetwork(localNetwork, remoteNetwork); err != nil {
-		return reconcile.Result{}, phaseError("greeting", err)
+		return reconcile.Result{}, phaseError("greeting", &NetworkMismatch{
+			LocalNetwork:   Network(localNetwork),
+			LocalMinEvents: local.Version.MinTicks(),
+			RemoteNetwork: Network(
+				remoteNetwork,
+			),
+			RemoteMinEvents: remote.Version.MinTicks(),
+			Err:             err,
+		})
 	}
 	if remoteNetwork.IsBootstrap() && !remote.Version.Equal(Version{}) {
 		return reconcile.Result{}, phaseError(
@@ -598,22 +592,25 @@ func exchangeItem[T any](
 		_ = carrier.Abort(readErr)
 	}
 	writeErr := <-writeDone
-	if readErr != nil {
-		return value, readErr
+	if readErr != nil || writeErr != nil {
+		if first := carrier.Err(); first != nil {
+			return value, first
+		}
+		return value, errors.Join(readErr, writeErr)
 	}
-	return value, writeErr
+	return value, nil
 }
 
 func writeItem(w io.Writer, p []byte) error {
 	n, err := w.Write(p)
 	if err != nil {
-		return err
+		return sessionerr.IO(sessionerr.Write, err)
 	}
 	if n != len(p) {
-		return io.ErrShortWrite
+		return sessionerr.IO(sessionerr.Write, io.ErrShortWrite)
 	}
 	if flush, ok := w.(interface{ Flush() error }); ok {
-		return flush.Flush()
+		return sessionerr.IO(sessionerr.Flush, flush.Flush())
 	}
 	return nil
 }

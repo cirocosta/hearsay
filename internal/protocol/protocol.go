@@ -9,6 +9,7 @@ import (
 
 	"github.com/cirocosta/hearsay/before"
 	"github.com/cirocosta/hearsay/internal/cbor"
+	"github.com/cirocosta/hearsay/internal/sessionerr"
 )
 
 // V2 constants define control and data-stream wire vocabulary.
@@ -111,7 +112,7 @@ func ParsePreamble(data []byte) (Preamble, error) {
 		if h.Major != cbor.MajorUint {
 			return p, invalid("version", ErrStructure)
 		}
-		return p, invalid("version", ErrProtocol)
+		return p, invalid("version", &VersionMismatch{Local: Version, Remote: h.Value})
 	}
 	if data[12] != 0x50 {
 		return p, invalid("network", ErrStructure)
@@ -283,7 +284,7 @@ func ParseGreeting(data []byte) (Greeting, error) {
 	if len(p.data) != 0 {
 		return g, invalid("greeting", cbor.ErrTrailing)
 	}
-	return parseGreetingBody(body)
+	return decodedGreetingBody(body)
 }
 
 func (p *parser) listing() ([]Child, error) {
@@ -408,7 +409,12 @@ func ReadGreeting(r io.Reader, maxBodyBytes uint64) (Greeting, error) {
 	if err != nil {
 		return Greeting{}, err
 	}
-	return parseGreetingBody(body)
+	return decodedGreetingBody(body)
+}
+
+func decodedGreetingBody(body []byte) (Greeting, error) {
+	g, err := parseGreetingBody(body)
+	return g, sessionerr.Protocol(err)
 }
 
 // GreetingBodyLimit bounds a full fan, all uint64 declarations, and a version
@@ -432,7 +438,7 @@ type Negotiation struct {
 func Negotiate(local, remote Greeting) (Negotiation, error) {
 	var n Negotiation
 	if local.PayloadDepthLimit != remote.PayloadDepthLimit {
-		return n, ErrDepth
+		return n, &DepthMismatch{Local: local.PayloadDepthLimit, Remote: remote.PayloadDepthLimit}
 	}
 	n.TargetMessageSize = min(
 		local.TargetMessageSize,

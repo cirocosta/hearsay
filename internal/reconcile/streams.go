@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/cirocosta/hearsay/internal/protocol"
+	"github.com/cirocosta/hearsay/internal/sessionerr"
 	"github.com/cirocosta/hearsay/link"
 	"github.com/cirocosta/hearsay/observe"
 )
@@ -135,20 +136,20 @@ func (s *streamSet) acceptLoop() {
 	for {
 		reader, err := s.transport.Accept(s.ctx)
 		if err != nil {
-			s.acceptError(err)
+			s.acceptError(s.incomingError(-1, sessionerr.IO(sessionerr.Accept, err)))
 			return
 		}
 		if !s.setPending(reader) {
 			_ = reader.Close()
 			return
 		}
-		label, err := protocol.ReadLabel(reader, s.epoch)
+		label, err := protocol.ReadLabel(labelReader{reader}, s.epoch)
 		if err != nil {
-			s.acceptError(err)
+			s.acceptError(s.labelError(err))
 			return
 		}
 		if err = s.route(reader, label.Stream); err != nil {
-			s.acceptError(err)
+			s.acceptError(s.incomingError(int(label.Stream), err))
 			return
 		}
 	}
@@ -190,30 +191,30 @@ func (s *streamSet) route(reader io.ReadCloser, index uint8) error {
 
 func (s *streamSet) send(index uint8, frame protocol.Frame) error {
 	if index >= link.StreamCount || frame.Stream != index {
-		return protocol.ErrStream
+		return s.outgoingError(int(index), protocol.ErrStream)
 	}
 	slot := &s.outgoing[index]
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
 	if slot.done {
-		return errStreamFinished
+		return s.outgoingError(int(index), errStreamFinished)
 	}
 	if err := s.ctx.Err(); err != nil {
 		return err
 	}
 	encoded, err := frame.AppendTo(slot.buf[:0], s.local)
 	if err != nil {
-		return err
+		return s.outgoingError(int(index), err)
 	}
 	slot.buf = encoded
 	if err = s.openWriter(index, slot); err != nil {
-		return err
+		return s.outgoingError(int(index), err)
 	}
 	if err = writeAll(slot.writer, encoded, &s.stats.bytesSent); err != nil {
-		return err
+		return s.outgoingError(int(index), err)
 	}
 	if err = flushStream(slot.writer); err != nil {
-		return err
+		return s.outgoingError(int(index), err)
 	}
 	if slot.observer != nil {
 		slot.observer.Message(encoded)
@@ -228,7 +229,7 @@ func (s *streamSet) openWriter(index uint8, slot *streamWriter) error {
 	}
 	writer, err := s.transport.Open(s.ctx)
 	if err != nil {
-		return err
+		return sessionerr.IO(sessionerr.Open, err)
 	}
 	s.mu.Lock()
 	if s.closing {
@@ -252,17 +253,17 @@ func writeAll(writer io.Writer, data []byte, counter *atomic.Uint64) error {
 	for len(data) > 0 {
 		n, err := writer.Write(data)
 		if n < 0 || n > len(data) {
-			return io.ErrShortWrite
+			return sessionerr.IO(sessionerr.Write, io.ErrShortWrite)
 		}
 		if counter != nil {
 			counter.Add(uint64(n))
 		}
 		data = data[n:]
 		if err != nil {
-			return err
+			return sessionerr.IO(sessionerr.Write, err)
 		}
 		if n == 0 {
-			return io.ErrShortWrite
+			return sessionerr.IO(sessionerr.Write, io.ErrShortWrite)
 		}
 	}
 	return nil
@@ -270,7 +271,7 @@ func writeAll(writer io.Writer, data []byte, counter *atomic.Uint64) error {
 
 func flushStream(writer io.Writer) error {
 	if flusher, ok := writer.(interface{ Flush() error }); ok {
-		return flusher.Flush()
+		return sessionerr.IO(sessionerr.Flush, flusher.Flush())
 	}
 	return nil
 }
@@ -307,7 +308,7 @@ func (r countedReader) Read(p []byte) (int, error) {
 	if n > 0 {
 		r.counter.Add(uint64(n))
 	}
-	return n, err
+	return n, sessionerr.IO(sessionerr.Read, err)
 }
 
 func (s *streamSet) readFrame(index uint8, reader io.Reader) (protocol.Frame, error) {
@@ -331,10 +332,10 @@ func (s *streamSet) decodeFrame(index uint8, reader io.Reader) (protocol.Frame, 
 		s.limits,
 	)
 	if err != nil {
-		return protocol.Frame{}, err
+		return protocol.Frame{}, s.incomingError(int(index), err)
 	}
 	if frame.Stream != index {
-		return protocol.Frame{}, protocol.ErrStream
+		return protocol.Frame{}, s.incomingError(int(index), protocol.ErrStream)
 	}
 	s.stats.framesReceived.Add(1)
 	return frame, nil
@@ -359,7 +360,7 @@ func (s *streamSet) finishSend(index uint8) error {
 	defer slot.mu.Unlock()
 	slot.done = true
 	if err := link.Complete(slot.writer); err != nil {
-		return err
+		return s.outgoingError(int(index), sessionerr.IO(sessionerr.Unknown, err))
 	}
 	s.mu.Lock()
 	s.activeWriters[index] = nil
@@ -382,11 +383,11 @@ func (s *streamSet) finishReceive(index uint8) error {
 		return err
 	}
 	if frame.Signal != protocol.StreamEnd {
-		return errExpectedStreamEnd
+		return s.incomingError(int(index), errExpectedStreamEnd)
 	}
 	slot.done = true
 	if err := link.Complete(slot.reader); err != nil {
-		return err
+		return s.incomingError(int(index), sessionerr.IO(sessionerr.Unknown, err))
 	}
 	s.mu.Lock()
 	s.activeReaders[index] = nil
@@ -444,7 +445,7 @@ func (s *streamSet) closeActive() error {
 
 func (s *streamSet) unfinishedStreams() error {
 	if s.pending != nil {
-		return errUnusedStream
+		return s.incomingError(-1, errUnusedStream)
 	}
 	for i := range s.incoming {
 		slot := &s.incoming[i]
@@ -452,14 +453,14 @@ func (s *streamSet) unfinishedStreams() error {
 		unfinished := slot.seen && (!slot.used || !slot.done)
 		slot.mu.Unlock()
 		if unfinished {
-			return errUnusedStream
+			return s.incomingError(i, errUnusedStream)
 		}
 		writer := &s.outgoing[i]
 		writer.mu.Lock()
 		unfinished = writer.writer != nil && !writer.done
 		writer.mu.Unlock()
 		if unfinished {
-			return errUnusedStream
+			return s.outgoingError(i, errUnusedStream)
 		}
 	}
 	return nil

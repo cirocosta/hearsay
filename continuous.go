@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cirocosta/hearsay/internal/protocol"
+	"github.com/cirocosta/hearsay/internal/sessionerr"
 	"github.com/cirocosta/hearsay/link"
 )
 
@@ -212,7 +213,7 @@ func (d *continuousDriver[T]) remoteWake(start controlStart) gossipWake {
 		return gossipWake{err: start.err}
 	}
 	_ = d.carrier.Close()
-	return gossipWake{err: phaseError("idle", start.err)}
+	return gossipWake{err: phaseError("idle", sessionerr.IO(sessionerr.Read, start.err))}
 }
 
 func (d *continuousDriver[T]) localWake(start controlStart) gossipWake {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/cirocosta/hearsay/before"
 	"github.com/cirocosta/hearsay/internal/cbor"
+	"github.com/cirocosta/hearsay/internal/sessionerr"
 )
 
 // Role identifies the elected speaker of a stream direction.
@@ -117,7 +118,7 @@ func ReadLabel(r io.Reader, epoch uint8) (Label, error) {
 		return label, err
 	}
 	if e != uint64(epoch) || s >= StreamCount {
-		return label, ErrStream
+		return label, &LabelError{ExpectedEpoch: epoch, Epoch: e, Stream: s}
 	}
 	label.Epoch = uint8(e)
 	label.Stream = uint8(s)
@@ -436,11 +437,14 @@ func readRun(r io.Reader, limits FrameLimits) (LeafRun, error) {
 		return LeafRun{}, ErrLimit
 	}
 	var prefix []byte
-	bounded := io.LimitReader(r, int64(length))
+	bounded := &io.LimitedReader{R: r, N: int64(length)}
 	target := min(limits.TargetMessageSize, MaxTargetMessageSize)
 	if length+SupplyOverhead > target {
 		prefix, err = loneRecordPrefix(bounded, length)
 		if err != nil {
+			if bounded.N == 0 {
+				return LeafRun{}, sessionerr.Protocol(err)
+			}
 			return LeafRun{}, err
 		}
 	}
@@ -448,7 +452,8 @@ func readRun(r io.Reader, limits FrameLimits) (LeafRun, error) {
 	if err != nil {
 		return LeafRun{}, err
 	}
-	return ParseRun(data)
+	run, err := ParseRun(data)
+	return run, sessionerr.Protocol(err)
 }
 
 func loneRecordPrefix(r io.Reader, length uint64) ([]byte, error) {
