@@ -179,16 +179,24 @@ func fill(e *event, p *identity) *event {
 		return leaf(e.high)
 	}
 	l, r := fill(e.left, p.left), fill(e.right, p.right)
+	// fully owned children are leaves; unchanged heights retain their subtree.
 	if p.left == owned {
-		l = leaf(maxCount(l.high, r.low))
+		l = fillOwned(l, r.low)
 	}
 	if p.right == owned {
-		r = leaf(maxCount(r.high, l.low))
+		r = fillOwned(r, l.low)
 	}
 	if l == e.left && r == e.right {
 		return e
 	}
 	return branch(l, r)
+}
+
+func fillOwned(e *event, minimum count) *event {
+	if e.low.cmp(minimum) < 0 {
+		return leaf(minimum)
+	}
+	return e
 }
 
 type growthCost struct{ branches, depth int }
