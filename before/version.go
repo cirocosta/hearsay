@@ -197,28 +197,26 @@ func (a growthCost) less(b growthCost) bool {
 	return a.branches < b.branches || a.branches == b.branches && a.depth < b.depth
 }
 
-// probe chooses fewer new branches, then smaller depth, with right winning ties.
-type route struct {
-	right bool
-	next  *route
-}
-
-func probe(e *event, p *identity) (growthCost, *route) {
+// probe stores route choices as packed indices. Zero encodes the terminal next
+// index; the low bit selects right. Unchosen routes remain cheap arena words.
+// Fewer new branches win, then smaller depth, with right winning ties.
+func probe(e *event, p *identity, routes []uint64) (growthCost, int, []uint64) {
 	if p == owned {
-		return growthCost{}, nil
+		return growthCost{}, -1, routes
 	} // fill has already collapsed this case.
 	l, r := children(e)
 	var cost growthCost
-	var next *route
+	var next int
 	right := false
 	if p.left == nil {
-		cost, next = probe(r, p.right)
+		cost, next, routes = probe(r, p.right, routes)
 		right = true
 	} else if p.right == nil {
-		cost, next = probe(l, p.left)
+		cost, next, routes = probe(l, p.left, routes)
 	} else {
-		a, an := probe(l, p.left)
-		b, bn := probe(r, p.right)
+		a, an, leftRoutes := probe(l, p.left, routes)
+		b, bn, rightRoutes := probe(r, p.right, leftRoutes)
+		routes = rightRoutes
 		cost, next, right = b, bn, true
 		if a.less(b) {
 			cost, next, right = a, an, false
@@ -228,18 +226,29 @@ func probe(e *event, p *identity) (growthCost, *route) {
 	if e.left == nil {
 		cost.branches++
 	}
-	return cost, &route{right: right, next: next}
+	index := len(routes)
+	return cost, index, appendRoute(routes, next, right)
 }
 
-func grow(e *event, path *route, n count) *event {
-	if path == nil {
+func appendRoute(routes []uint64, next int, right bool) []uint64 {
+	word := uint64(next+1) << 1
+	if right {
+		word |= 1
+	}
+	return append(routes, word)
+}
+
+func grow(e *event, routes []uint64, index int, n count) *event {
+	if index < 0 {
 		return leaf(e.low.add(n))
 	}
 	l, r := children(e)
-	if path.right {
-		return branch(l, grow(r, path.next, n))
+	word := routes[index]
+	next := int(word>>1) - 1
+	if word&1 != 0 {
+		return branch(l, grow(r, routes, next, n))
 	}
-	return branch(grow(l, path.next, n), r)
+	return branch(grow(l, routes, next, n), r)
 }
 
 // Tick returns the history after one event recorded by p.
@@ -264,8 +273,17 @@ func (v Version) ticks(p *Party, n count) Version {
 			return Version{root: f}
 		}
 	}
-	_, path := probe(f, i)
-	return Version{root: grow(f, path, n)}
+	if i == owned {
+		return Version{root: leaf(f.low.add(n))}
+	}
+	return Version{root: growPartial(f, i, n)}
+}
+
+func growPartial(f *event, i *identity, n count) *event {
+	var local [64]uint64
+	routes := local[:0]
+	_, path, routes := probe(f, i, routes)
+	return grow(f, routes, path, n)
 }
 
 // Minimum returns the minimum event count across the complete interval.
