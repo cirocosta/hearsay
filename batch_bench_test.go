@@ -51,7 +51,7 @@ func makeAtomicBatchFixture(size, delta int, kind string) atomicBatchFixture {
 // setup; each operation starts from the same immutable tree and causal history.
 func BenchmarkApplyBatch(b *testing.B) {
 	for _, size := range []int{0, 1000, 10000} {
-		for _, delta := range []int{1, 8, 64, 512} {
+		for _, delta := range []int{1, 2, 4, 7, 8, 64, 512} {
 			for _, kind := range []string{"send", "redact", "mixed"} {
 				if size == 0 && kind != "send" {
 					continue
