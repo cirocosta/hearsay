@@ -1,4 +1,4 @@
-// Package protocol implements rumors V2 control-stream items.
+// Package protocol implements Hearsay's V2 control-stream items.
 package protocol
 
 import (
@@ -29,15 +29,15 @@ const (
 
 // Wire validation errors can be inspected with errors.Is.
 var (
-	ErrMagic           = errors.New("not a rumors preamble")
-	ErrProtocol        = errors.New("rumors protocol version mismatch")
-	ErrNetwork         = errors.New("rumors network mismatch")
+	ErrMagic           = errors.New("hearsay: invalid session preamble")
+	ErrProtocol        = errors.New("hearsay: protocol version mismatch")
+	ErrNetwork         = errors.New("hearsay: network mismatch")
 	ErrIntent          = errors.New("invalid session intent")
 	ErrBootstrapRetire = errors.New("bootstrap cannot retire")
-	ErrStructure       = errors.New("malformed rumors item")
+	ErrStructure       = errors.New("hearsay: malformed protocol item")
 	ErrOrder           = errors.New("listing radices are not strictly ascending")
 	ErrDepth           = errors.New("payload depth limit mismatch")
-	ErrLimit           = errors.New("rumors resource limit exceeded")
+	ErrLimit           = errors.New("hearsay: protocol resource limit exceeded")
 )
 
 // Error identifies the rejected wire field and retains its underlying cause.
@@ -71,6 +71,7 @@ type Preamble struct {
 	Intent  Intent
 }
 
+// the upstream V2 wire magic must remain byte-compatible.
 const preamblePrefix = "\xd9\xd9\xf7\x84\x66rumors"
 
 // Validate rejects undefined or conflicting intent values.

@@ -454,7 +454,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rumors-interop"
+name = "hearsay-interop"
 version = "0.1.0"
 dependencies = [
  "before",

@@ -11,6 +11,19 @@ A partial in-process replica or full-state exchange does not satisfy this target
 Go APIs may express ownership and cancellation differently, but must preserve
 the upstream guarantees.
 
+## Naming and compatibility
+
+Hearsay's shared writable handle is `Replica[T]`. `Peer.IntoReplica` transfers
+exclusive identity ownership into that handle; `TryIntoPeer` and `IntoPeer`
+recover it. Examples, diagnostics, and the `hearsay-interop` verifier use Hearsay's
+names. The original `Rumors` Go type and `IntoRumors` method have been removed;
+callers must use `Replica` and `IntoReplica`.
+
+The V2 preamble still contains the literal `rumors`. That text identifies the
+wire protocol and must remain byte-compatible. The Rust dependency, pinned clone
+path, fixture generators, and upstream attribution also retain their actual
+names. The Go API rename does not change wire or bookmark formats.
+
 ## Required behavior and evidence
 
 | Requirement                | Acceptance evidence                                                                                                                                                                                                                                                                                                        |

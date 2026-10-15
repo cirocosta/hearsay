@@ -1,4 +1,4 @@
-# Rust-Go interoperability verifier
+# Hearsay interoperability verifier
 
 Run the explicit verifier from the repository root:
 
@@ -18,8 +18,10 @@ its commit or tracked contents differ. The Rust CLI uses the real upstream
 versions from the upstream lock, including `ciborium` 0.2.2. The Rust toolchain
 file pins upstream's compiler version 1.97.1.
 
-Build artifacts stay under `.agi.local/interop-target`. The runner exchanges
-V2 sessions over loopback TCP using the public routed adapters on both sides.
+The Rust harness builds as `hearsay-interop`; it uses the upstream dependency's
+original crate and API names. Build artifacts stay under `.agi.local/interop-target`.
+The runner exchanges V2 sessions over loopback TCP using the public routed
+adapters on both sides.
 The Rust payload type is `bytes::Bytes`, whose serde CBOR byte-string encoding
 matches Go `BytesCodec`.
 

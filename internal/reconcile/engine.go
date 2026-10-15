@@ -1,4 +1,4 @@
-// Package reconcile implements the bounded, pipelined rumors V2 data phase.
+// Package reconcile implements Hearsay's bounded, pipelined V2 data phase.
 // Control negotiation, identity transfer, and publishing the final snapshot
 // belong to the caller.
 package reconcile

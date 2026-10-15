@@ -32,7 +32,7 @@ type rust struct {
 func startRust(mode string) (*rust, error) {
 	binary := os.Getenv("HEARSAY_INTEROP_RUST_BIN")
 	if binary == "" {
-		binary = ".agi.local/interop-target/debug/rumors-interop"
+		binary = ".agi.local/interop-target/debug/hearsay-interop"
 	}
 	cmd := exec.Command(binary, mode)
 	input, err := cmd.StdinPipe()

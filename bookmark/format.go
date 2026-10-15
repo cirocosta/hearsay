@@ -51,7 +51,7 @@ func (e *FormatError) Error() string {
 	case ErrRecord:
 		return fmt.Sprintf("the bookmark payload is not a valid recovery record: %v", e.Err)
 	default:
-		return fmt.Sprintf("not a rumors bookmark: %v", e.Err)
+		return fmt.Sprintf("hearsay: invalid bookmark envelope: %v", e.Err)
 	}
 }
 

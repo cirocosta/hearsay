@@ -26,7 +26,7 @@ mkdir -p -- "$project_dir/.agi.local/interop-artifacts"
     cd -- "$project_dir/interop/rust"
     cargo build --locked --target-dir "$project_dir/.agi.local/interop-target"
 )
-export HEARSAY_INTEROP_RUST_BIN="$project_dir/.agi.local/interop-target/debug/rumors-interop"
+export HEARSAY_INTEROP_RUST_BIN="$project_dir/.agi.local/interop-target/debug/hearsay-interop"
 if [[ ${HEARSAY_INTEROP_RACE:-0} == 1 ]]; then
     exec go run -race ./interop/runner
 fi

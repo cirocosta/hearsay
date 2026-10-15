@@ -1,4 +1,4 @@
-// Package cbor implements the canonical head grammar used by rumors V2.
+// Package cbor implements the canonical head grammar used by Hearsay's V2 protocol.
 //
 // Head readers consume exactly one head without buffering subsequent bytes.
 // Payload reads grow only as bytes arrive. ScanItem is a separate, bounded
