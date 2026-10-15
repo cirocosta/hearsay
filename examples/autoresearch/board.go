@@ -10,15 +10,16 @@ import (
 )
 
 type note struct {
-	ID     string            `json:"id"`
-	Author string            `json:"author"`
-	Seq    int               `json:"seq"`
-	Kind   string            `json:"kind"`
-	Topic  string            `json:"topic,omitempty"`
-	Ref    string            `json:"ref,omitempty"`
-	Agree  bool              `json:"agree,omitempty"`
-	Body   string            `json:"body,omitempty"`
-	Files  map[string]string `json:"files,omitempty"`
+	ID          string            `json:"id"`
+	Author      string            `json:"author"`
+	Seq         int               `json:"seq"`
+	Kind        string            `json:"kind"`
+	Ref         string            `json:"ref,omitempty"`
+	Exhausted   bool              `json:"exhausted,omitempty"`
+	Measurement *measurement      `json:"measurement,omitempty"`
+	Result      *commandResult    `json:"result,omitempty"`
+	Body        string            `json:"body,omitempty"`
+	Files       map[string]string `json:"files,omitempty"`
 }
 
 func readBoard(replica *hearsay.Replica[note]) ([]note, error) {
@@ -41,53 +42,22 @@ func findNote(notes []note, id string) (note, error) {
 	return note{}, fmt.Errorf("message %q is not in your local replica yet", id)
 }
 
-func agreements(notes []note, members []string) []note {
-	var agreed []note
-	for _, n := range notes {
-		if n.Kind == "proposal" && voteCount(notes, n.ID, members) == len(members) {
-			agreed = append(agreed, n)
-		}
-	}
-	return agreed
-}
-
-func voteCount(notes []note, proposal string, members []string) int {
-	topics := proposalTopics(notes)
+func allExhausted(notes []note, members []string) bool {
 	latest := make(map[string]note)
 	for _, n := range notes {
-		if n.Kind == "vote" && topics[n.Ref] == topics[proposal] && n.Seq > latest[n.Author].Seq {
+		if n.Kind == "status" && n.Seq > latest[n.Author].Seq {
 			latest[n.Author] = n
 		}
 	}
-	count := 0
 	for _, member := range members {
-		if latest[member].Agree && latest[member].Ref == proposal {
-			count++
+		if !latest[member].Exhausted {
+			return false
 		}
 	}
-	return count
+	return len(members) > 0
 }
 
-func proposalTopics(notes []note) map[string]string {
-	topics := make(map[string]string)
-	for _, n := range notes {
-		if n.Kind == "proposal" {
-			topics[n.ID] = n.Topic
-		}
-	}
-	return topics
-}
-
-func stopAgreement(notes []note, members []string) string {
-	for _, n := range agreements(notes, members) {
-		if n.Topic == "stop" {
-			return n.ID
-		}
-	}
-	return ""
-}
-
-func boardDelta(notes []note, seen map[string]bool, members []string, limits string) string {
+func boardDelta(notes []note, seen map[string]bool, limits string) string {
 	var fresh []note
 	for _, n := range notes {
 		if !seen[n.ID] {
@@ -96,10 +66,10 @@ func boardDelta(notes []note, seen map[string]bool, members []string, limits str
 		}
 	}
 	view := struct {
-		New    []note `json:"new_messages"`
-		Agreed []note `json:"unanimous_proposals"`
+		New []note `json:"new_messages"`
+
 		Limits string `json:"operational_limits"`
-	}{New: fresh, Agreed: agreements(notes, members), Limits: limits}
+	}{New: fresh, Limits: limits}
 	data, _ := json.Marshal(view)
 	return string(data)
 }

@@ -1,0 +1,110 @@
+package main
+
+import (
+	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+
+	"research/contract"
+	oracle "research/oracle"
+	"research/parser"
+	incumbent "research/reference"
+)
+
+// synthetic fixtures are a fixed demonstration workload, not production samples.
+var corpus = [][]byte{
+	[]byte(`{"channel":"trades","data":[{"coin":"BTC","side":"B","px":"63123.45","sz":"0.125","time":1720000000000,"hash":"0xabc","tid":123}]}`),
+	[]byte(`{"channel":"trades","data":[]}`),
+	[]byte(`{"channel":"l2Book","data":{"coin":"ETH","time":1720000000001,"levels":[[{"px":"3400.1","sz":"2.0","n":3}],[{"px":"3400.2","sz":"1.5","n":2}]]}}`),
+	[]byte(` { "data": { "levels": [[],[]], "time": 1, "coin": "B\u0054C" }, "channel": "l2Book" } `),
+	[]byte(`{"channel":"trades","data":[{"coin":"ETH","side":"A","px":"0.000000000123","sz":"999999.123456789","time":9223372036854775807,"hash":"escaped\"value","tid":9007199254740993},{"coin":"BTC","side":"B","px":"1","sz":"2","time":0,"tid":2}]}`),
+	[]byte(`{"channel":"trades","data":null}`),
+	[]byte(`{"channel":"l2Book","data":null}`),
+}
+
+func TestParse(t *testing.T) {
+	inputs := append([][]byte(nil), corpus...)
+	for _, text := range []string{
+		``, `{`, `null`, `{"channel":"other","data":[]}`,
+		`{"channel":"trades"}`, `{"channel":"trades","data":{}}`,
+		`{"channel":"l2Book","data":[]}`, `{"channel":"trades","data":[]} trailing`,
+		`{"channel":"trades","data":[{"time":1.5}]}`,
+		`{"channel":"trades","data":[{"time":9223372036854775808}]}`,
+		`{"channel":"l2Book","data":{"levels":[[{"px":1}],[]]}}`,
+		`{"channel":"trades","data":[],"channel":"other"}`,
+		`{"channel":"trades","data":null,"channel":"l2Book"}`,
+		`{"channel":"l2Book","data":null,"channel":"trades"}`,
+		`{"channel":"trades","data":{"coin":"BTC","levels":[[],[]]},"channel":"l2Book"}`,
+		`{"channel":"trades","data":{},"data":[]}`,
+		`{"channel":"l2Book","data":{"coin":"BTC"},"data":{"time":1}}`,
+		`{"channel":"trades","data":[{"px":1}],"data":[]}`,
+		`{"channel":"trades","data":[],"Channel":"other"}`,
+	} {
+		inputs = append(inputs, []byte(text))
+	}
+	for _, data := range inputs {
+		expected, wantErr := oracle.Parse(data)
+		got, err := parser.Parse(data)
+		if (err != nil) != (wantErr != nil) || (err == nil && !reflect.DeepEqual(got, expected)) {
+			t.Fatalf("Parse(%q) = %+v, %v; want %+v, %v", data, got, err, expected, wantErr)
+		}
+		if err == nil {
+			before, _ := json.Marshal(got)
+			owned := append([]byte(nil), data...)
+			value, parseErr := parser.Parse(owned)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			for i := range owned {
+				owned[i] = 'x'
+			}
+			after, _ := json.Marshal(value)
+			if string(before) != string(after) {
+				t.Fatal("output borrows input storage")
+			}
+		}
+	}
+}
+
+func FuzzParse(f *testing.F) {
+	for _, data := range corpus {
+		f.Add(data)
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		want, wantErr := oracle.Parse(data)
+		got, err := parser.Parse(data)
+		if (err != nil) != (wantErr != nil) || (err == nil && !reflect.DeepEqual(got, want)) {
+			t.Fatalf("parser differs from encoding/json on %q", data)
+		}
+	})
+}
+
+var sink contract.Message
+
+func benchmark(b *testing.B, parse func([]byte) (contract.Message, error)) {
+	b.ReportAllocs()
+	for b.Loop() {
+		for _, data := range corpus {
+			var err error
+			sink, err = parse(data)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func BenchmarkCandidate(b *testing.B) { benchmark(b, parser.Parse) }
+func BenchmarkReference(b *testing.B) { benchmark(b, incumbent.Parse) }
+
+func TestLargeBook(t *testing.T) {
+	level := `{"px":"123.456","sz":"7.890","n":4}`
+	data := []byte(`{"channel":"l2Book","data":{"coin":"BTC","time":1,"levels":[[` +
+		strings.TrimSuffix(strings.Repeat(level+",", 100), ",") + `],[]]}}`)
+	want, _ := oracle.Parse(data)
+	got, err := parser.Parse(data)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatal("large book differs from reference")
+	}
+}

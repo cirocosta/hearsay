@@ -47,12 +47,15 @@ func (s *eventReader) next() ([]byte, error) {
 		}
 	}
 	if err := s.scanner.Err(); err != nil {
-		return nil, err
+		if errors.Is(err, bufio.ErrTooLong) {
+			return nil, err
+		}
+		return nil, transientError{err}
 	}
 	if s.data.Len() != 0 {
 		return s.event()
 	}
-	return nil, io.ErrUnexpectedEOF
+	return nil, transientError{io.ErrUnexpectedEOF}
 }
 
 func (s *eventReader) append(line string) error {

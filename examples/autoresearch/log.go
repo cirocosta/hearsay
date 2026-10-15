@@ -36,9 +36,6 @@ func (l *logger) message(n note) {
 	l.mu.Lock()
 	_ = json.NewEncoder(l.events).Encode(n)
 	l.mu.Unlock()
-	text := fmt.Sprintf("%s %s %s %s", n.ID, n.Topic, n.Ref, n.Body)
-	if n.Kind == "vote" {
-		text = fmt.Sprintf("%s ref=%s agree=%t %s", n.ID, n.Ref, n.Agree, n.Body)
-	}
+	text := fmt.Sprintf("%s %s %s %s", n.ID, n.Kind, n.Ref, n.Body)
 	l.print(n.Author, n.Kind, text)
 }

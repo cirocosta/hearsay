@@ -33,6 +33,10 @@ func createRun(cfg config) (*os.File, error) {
 }
 
 func runSwarm(ctx context.Context, cfg config, provider model, output io.Writer) error {
+	prior, err := loadResearch(cfg)
+	if err != nil {
+		return err
+	}
 	events, err := createRun(cfg)
 	if err != nil {
 		return err
@@ -49,7 +53,10 @@ func runSwarm(ctx context.Context, cfg config, provider model, output io.Writer)
 	}
 	defer n.close()
 	defer cancel()
-	agents, err := prepareAgents(cfg, n, provider, log)
+	if err := prior.replay(n, events); err != nil {
+		return err
+	}
+	agents, err := prepareAgents(cfg, n, provider, log, prior)
 	if err != nil {
 		return err
 	}
@@ -64,9 +71,12 @@ func runSwarm(ctx context.Context, cfg config, provider model, output io.Writer)
 		err = drainGossip(ctx, n)
 	}
 	if err == nil {
-		err = checkFinalAgreement(n, agents)
+		err = checkFinalExhaustion(n, agents[0].members)
 	}
 	cancel()
+	if saveErr := saveWinner(cfg.Directory, agents[0].executor.best); saveErr != nil {
+		err = errors.Join(err, saveErr)
+	}
 	if saveErr := saveBoards(cfg.Directory, n); saveErr != nil {
 		err = errors.Join(err, saveErr)
 	}
@@ -83,16 +93,27 @@ func runSwarm(ctx context.Context, cfg config, provider model, output io.Writer)
 		log.print("swarm", "limited", err.Error())
 		return err
 	}
-	log.print("swarm", "agreed", "all agents observed unanimous stop; boards converged")
+	log.print("swarm", "exhausted", "all agents exhausted their ideas; experiment logs converged")
 	return nil
 }
 
-func prepareAgents(cfg config, n *network, provider model, log *logger) ([]*agent, error) {
+func prepareAgents(
+	cfg config,
+	n *network,
+	provider model,
+	log *logger,
+	prior research,
+) ([]*agent, error) {
 	members := make([]string, cfg.Agents)
 	for i := range members {
 		members[i] = fmt.Sprintf("agent-%02d", i)
 	}
-	commands := &executor{lane: make(chan struct{}, 1), timeout: cfg.CommandTimeout}
+	commands := &executor{
+		lane:      make(chan struct{}, 1),
+		timeout:   cfg.CommandTimeout,
+		directory: cfg.Directory,
+		best:      prior.Best,
+	}
 	var agents []*agent
 	for i, id := range members {
 		directory := filepath.Join(cfg.Directory, id)
@@ -105,10 +126,21 @@ func prepareAgents(cfg config, n *network, provider model, log *logger) ([]*agen
 			closeAgents(agents)
 			return nil, err
 		}
-		agents = append(agents, &agent{
+		files := baselineFiles()
+		if prior.Packages[id] != nil {
+			files = prior.Packages[id]
+		}
+		if err := seedWorkspace(root, files, baselineFiles()); err != nil {
+			_ = root.Close()
+			closeAgents(agents)
+			return nil, err
+		}
+		a := &agent{
 			id: id, members: members, peer: n.peers[i], model: provider,
 			root: root, executor: commands, log: log,
-		})
+		}
+		a.restore(prior.Notes)
+		agents = append(agents, a)
 	}
 	return agents, nil
 }
@@ -119,19 +151,13 @@ func closeAgents(agents []*agent) {
 	}
 }
 
-func checkFinalAgreement(n *network, agents []*agent) error {
-	expected := agents[0].finished
-	for _, a := range agents {
-		if expected == "" || a.finished != expected {
-			return errors.New("agents observed different stop decisions")
-		}
-	}
+func checkFinalExhaustion(n *network, members []string) error {
 	notes, err := readBoard(n.peers[0])
 	if err != nil {
 		return err
 	}
-	if stopAgreement(notes, agents[0].members) != expected {
-		return errors.New("stop agreement was withdrawn before final convergence")
+	if !allExhausted(notes, members) {
+		return errors.New("exhaustion status changed before final convergence")
 	}
 	return nil
 }

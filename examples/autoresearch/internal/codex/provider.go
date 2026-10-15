@@ -59,6 +59,8 @@ type Client struct {
 
 type transientError struct{ error }
 
+func (e transientError) Unwrap() error { return e.error }
+
 // Respond performs one authenticated streaming request.
 func (r *Client) Respond(ctx context.Context, input Request) (Turn, error) {
 	var result Turn
@@ -135,9 +137,16 @@ func (r *Client) request(
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := client.Do(request)
 	if err != nil {
-		return Turn{}, err
+		if ctx.Err() != nil {
+			return Turn{}, ctx.Err()
+		}
+		return Turn{}, transientError{err}
 	}
 	defer func() { _ = response.Body.Close() }()
+	return decodeResponse(response)
+}
+
+func decodeResponse(response *http.Response) (Turn, error) {
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		err := fmt.Errorf("codex HTTP %d: %s", response.StatusCode, body)

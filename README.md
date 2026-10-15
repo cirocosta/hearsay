@@ -66,6 +66,6 @@ make bench    # local and network-model benchmarks
 ```
 
 See [the research swarm example](examples/autoresearch/README.md) for ten
-LLM agents that use Hearsay to negotiate and run parser optimization experiments.
+LLM agents that use Hearsay to share parser experiments and learn from each other.
 
 Hearsay is inspired by Oxide's [rumors](https://github.com/oxidecomputer/rumors).

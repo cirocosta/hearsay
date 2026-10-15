@@ -17,8 +17,7 @@ import (
 	"time"
 )
 
-// scriptedResearch sees only each agent's model context, never other replicas
-// or directories. The negotiation script is a test double, not production policy.
+// scripted research sees only local model context, never other replicas.
 type scriptedResearch struct{ calls atomic.Int64 }
 
 func (s *scriptedResearch) Respond(
@@ -67,169 +66,50 @@ func testTool(name string, args any) call {
 
 func waitTool() []call { return []call{testTool("wait", map[string]int{"seconds": 1})} }
 
-func proposal(notes []note, topic string) note {
-	for _, n := range notes {
-		if n.Kind == "proposal" && n.Topic == topic {
-			return n
-		}
-	}
-	return note{}
-}
-
-func voted(notes []note, actor, ref string) bool {
-	for _, n := range notes {
-		if n.Kind == "vote" && n.Author == actor && n.Ref == ref {
-			return true
-		}
-	}
-	return false
-}
-
 func researchStep(actor string, notes []note) []call {
-	first := proposal(notes, "plan-draft")
-	if first.ID == "" && actor == "agent-00" {
-		return []call{
-			testTool(
-				"propose",
-				map[string]string{"topic": "plan-draft", "body": "optimize immediately"},
-			),
-		}
-	}
-	if first.ID != "" && actor == "agent-05" && !voted(notes, actor, first.ID) {
-		return []call{
-			testTool(
-				"vote",
-				map[string]any{"ref": first.ID, "agree": false, "body": "agree correctness first"},
-			),
-		}
-	}
-	return revisedResearchStep(actor, notes, first)
-}
-
-func revisedResearchStep(actor string, notes []note, first note) []call {
-	plan := proposal(notes, "plan")
-	if plan.ID == "" {
-		if actor == "agent-00" && voted(notes, "agent-05", first.ID) {
-			return []call{
-				testTool(
-					"propose",
-					map[string]string{
-						"topic": "plan",
-						"body":  "agree checks, share source, independently reproduce, then stop",
-					},
-				),
-			}
-		}
-		return waitTool()
-	}
-	if !voted(notes, actor, plan.ID) {
-		return []call{
-			testTool(
-				"vote",
-				map[string]any{"ref": plan.ID, "agree": true, "body": "accept revised plan"},
-			),
-		}
-	}
-	if voteCount(notes, plan.ID, testMembers()) != 10 {
-		return waitTool()
-	}
-	return evaluationStep(actor, notes)
-}
-
-func evaluationStep(actor string, notes []note) []call {
-	evaluation := proposal(notes, "evaluation")
-	if evaluation.ID == "" {
-		if actor == "agent-01" {
-			return []call{
-				testTool(
-					"propose",
-					map[string]string{
-						"topic": "evaluation",
-						"body":  "two independent file checks; this test makes no speed claim",
-					},
-				),
-			}
-		}
-		return waitTool()
-	}
-	if !voted(notes, actor, evaluation.ID) {
-		return []call{
-			testTool(
-				"vote",
-				map[string]any{"ref": evaluation.ID, "agree": true, "body": "accept evaluation"},
-			),
-		}
-	}
-	if voteCount(notes, evaluation.ID, testMembers()) != 10 {
-		return waitTool()
-	}
-	return experimentStep(actor, notes)
-}
-
-func experimentStep(actor string, notes []note) []call {
-	artifact := note{}
-	results := make(map[string]bool)
 	for _, n := range notes {
-		if n.Kind == "artifact" {
-			artifact = n
-		}
-		if n.Kind == "result" {
-			results[n.Author] = true
+		if n.Author == actor && n.Kind == "status" && n.Exhausted {
+			return waitTool()
 		}
 	}
-	if actor == "agent-02" && artifact.ID == "" {
+	rest := testTool("status", map[string]any{"exhausted": true, "body": "no further ideas"})
+	if actor == "agent-00" {
 		return []call{
+			testTool("try", map[string]string{"body": "measure the baseline"}),
+			testTool("evaluate", map[string]string{"body": "baseline evidence"}), rest,
+		}
+	}
+	if actor == "agent-01" {
+		for _, n := range notes {
+			if n.Author == "agent-00" && n.Kind == "experiment" {
+				return []call{
+					testTool("adopt", map[string]string{"ref": n.ID}),
+					testTool(
+						"try",
+						map[string]string{"body": "independently reproduce peer evidence"},
+					),
+					testTool("evaluate", map[string]string{"body": "reproduced"}),
+					rest,
+				}
+			}
+		}
+		return waitTool()
+	}
+	if actor == "agent-02" {
+		return []call{
+			testTool("try", map[string]string{"body": "a deliberately broken parser"}),
 			testTool(
 				"write_file",
-				map[string]string{"path": "candidate.go", "content": "package parser\n"},
+				map[string]string{"path": "parser/parser.go", "content": "package parser\n"},
 			),
 			testTool(
-				"run",
-				map[string]string{"command": "test -s candidate.go && printf 'checked\\n'"},
+				"evaluate",
+				map[string]string{"body": "failed candidate remains in the notebook"},
 			),
-			testTool(
-				"share",
-				map[string]string{
-					"paths": "candidate.go",
-					"body":  "candidate for independent reproduction",
-				},
-			),
+			rest,
 		}
 	}
-	if actor == "agent-03" && artifact.ID != "" && !results[actor] {
-		return []call{
-			testTool("adopt", map[string]string{"ref": artifact.ID}),
-			testTool(
-				"run",
-				map[string]string{"command": "test -s candidate.go && printf 'replicated\\n'"},
-			),
-		}
-	}
-	return finishResearchStep(actor, notes, results)
-}
-
-func finishResearchStep(actor string, notes []note, results map[string]bool) []call {
-	stop := proposal(notes, "stop")
-	if stop.ID == "" && actor == "agent-04" && results["agent-02"] && results["agent-03"] {
-		return []call{
-			testTool(
-				"propose",
-				map[string]string{
-					"topic": "stop",
-					"body":  "shared artifact independently checked; agreed test goal complete",
-				},
-			),
-		}
-	}
-	if stop.ID != "" && !voted(notes, actor, stop.ID) {
-		return []call{
-			testTool(
-				"vote",
-				map[string]any{"ref": stop.ID, "agree": true, "body": "checks complete"},
-			),
-		}
-	}
-	return waitTool()
+	return []call{rest}
 }
 
 func testMembers() []string {
@@ -240,14 +120,14 @@ func testMembers() []string {
 	return members
 }
 
-func TestTenAgentsNegotiateThroughGossip(t *testing.T) {
+func TestTenAgentsShareExperimentsThroughGossip(t *testing.T) {
 	cfg := config{
 		Agents:         10,
 		Model:          "gpt-6-luna",
-		Goal:           "negotiate, exchange an artifact, reproduce, and agree to stop",
+		Goal:           "share experiments, reproduce a peer candidate, and report exhaustion",
 		Directory:      filepath.Join(t.TempDir(), "run"),
 		Turns:          2000,
-		CommandTimeout: time.Second,
+		CommandTimeout: 20 * time.Second,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -265,8 +145,27 @@ func TestTenAgentsNegotiateThroughGossip(t *testing.T) {
 		if err := json.Unmarshal(data, &notes); err != nil {
 			t.Fatal(err)
 		}
-		if stopAgreement(notes, testMembers()) == "" || len(agreements(notes, testMembers())) != 3 {
-			t.Fatalf("%s did not observe all three agreements", member)
+		if !allExhausted(notes, testMembers()) {
+			t.Fatalf("%s did not observe exhaustion", member)
+		}
+		experiments := 0
+		for _, n := range notes {
+			if n.Kind != "experiment" {
+				continue
+			}
+			experiments++
+			if n.Ref == "" || n.Measurement == nil || len(n.Files) == 0 {
+				t.Fatal("experiment missing linked evidence")
+			}
+			if n.Author == "agent-02" && n.Result.Exit == 0 {
+				t.Fatal("broken parser passed")
+			}
+			if n.Author != "agent-02" && len(n.Measurement.CandidateNS) != 5 {
+				t.Fatalf("missing benchmark samples: %+v", n)
+			}
+		}
+		if experiments != 3 {
+			t.Fatalf("got %d experiments", experiments)
 		}
 		if first == nil {
 			first = notes
@@ -274,13 +173,16 @@ func TestTenAgentsNegotiateThroughGossip(t *testing.T) {
 			t.Fatal("final gossip did not converge")
 		}
 	}
-	for _, member := range []string{"agent-02", "agent-03"} {
-		data, err := os.ReadFile(filepath.Join(cfg.Directory, member, "candidate.go"))
-		if err != nil || string(data) != "package parser\n" {
+	for _, member := range []string{"agent-00", "agent-01"} {
+		data, err := os.ReadFile(filepath.Join(cfg.Directory, member, "parser", "parser.go"))
+		if err != nil || string(data) != baselineFiles()["parser/parser.go"] {
 			t.Fatalf("artifact did not cross gossip into %s: %q %v", member, data, err)
 		}
 	}
-	if !strings.Contains(output.String(), "boards converged") {
+	if _, err := os.Stat(filepath.Join(cfg.Directory, "winner", "main.go")); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "experiment logs converged") {
 		t.Fatal("missing convergence outcome")
 	}
 }
@@ -291,16 +193,16 @@ func (silentModel) Respond(context.Context, string, []json.RawMessage) (turn, er
 	return turn{}, nil
 }
 
-func TestLimitIsNotAgreement(t *testing.T) {
+func TestLimitPreservesResearchWithoutClaimingExhaustion(t *testing.T) {
 	cfg := config{
 		Agents:         10,
 		Directory:      filepath.Join(t.TempDir(), "run"),
 		Turns:          1,
-		CommandTimeout: time.Second,
+		CommandTimeout: 20 * time.Second,
 	}
 	var output bytes.Buffer
 	err := runSwarm(context.Background(), cfg, silentModel{}, &output)
-	if !errors.Is(err, errLimit) || strings.Contains(output.String(), "boards converged") {
+	if !errors.Is(err, errLimit) || strings.Contains(output.String(), "experiment logs converged") {
 		t.Fatalf("limit reported as success: %v\n%s", err, output.String())
 	}
 }

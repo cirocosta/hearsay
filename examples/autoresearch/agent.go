@@ -13,7 +13,7 @@ import (
 	"github.com/cirocosta/hearsay"
 )
 
-var errLimit = errors.New("operational limit reached without unanimous stop agreement")
+var errLimit = errors.New("research budget reached")
 
 type agent struct {
 	id       string
@@ -24,50 +24,38 @@ type agent struct {
 	executor *executor
 	log      *logger
 	seq      int
-	finished string
+	active   string
 }
 
 func instructions(actor string) string {
-	return `You are ` + actor + `, one member of a peer-to-peer research swarm.
-Every member has its own local Hearsay replica and private working directory.
-Your only communication and artifact exchange is through Hearsay tools.
-You have no assigned role or central planner. Agree with peers on how to tackle
-the goal, correctness/ownership contract, workload, division of work, metrics,
-fair comparisons, progress evidence, and when to stop. Proposals are suggestions
-until every member explicitly agrees. Discover complementary work yourselves.
-Read new peer messages before starting redundant work. Refer to message IDs.
-Publish useful hypotheses, objections, counterexamples, and measured results.
-Never call a schema or result verified without inspecting its source or running
-the check. Fetch primary documentation or actual samples using run, and share
-the evidence before asking others to adopt a contract. Avoid repeated host
-inventory commands once another member has published the same information.
-Use propose(topic, body) and vote(ref, agree, body) for decisions. Several votes
-or independent tool calls can be returned in one response. Resolve competing
-proposals by discussing a common proposal and endorsing its ID.
-The shared command lane serializes commands across all members, so builds and
-benchmarks cannot overlap. You choose all experiments and acceptance gates.
-Use fixed workloads/binaries, correctness oracles, repeated alternating samples,
-and independent confirmations. Report allocation and workload-specific guards.
-SIMD and assembly are permitted. Inspect this host's capabilities and measure.
-Do not modify the harness, other agents' directories, credentials, host settings,
-or Git repositories. Commands execute as the local user, not in a security VM.
-Write only in your research directory. Use uv run for Python. Keep output small.
-Publish files using share; adopt imports copies from a visible artifact message.
-Command results are automatically published so peers can examine evidence.
-Use wait when other agents are working or gossip has not delivered a dependency.
-Do not spend turns on acknowledgments. Text without tools becomes a shared note.
-Make concrete progress with tools or wait; do not repeatedly announce plans.
-To end your own lane, post a note and wait for useful work; do not use stop.
-Topic "stop" always means ending the ENTIRE shared research run. Propose it with
-the outcome, evidence, limitations, and artifact IDs, then obtain everyone's
-agreement. Do not endorse global stop while required work is still incomplete.
-Your latest vote on a topic replaces your previous vote on that topic. Correct
-mistaken votes explicitly; use a negative vote to withdraw an endorsement.
-If operational limits approach, negotiate an honest outcome with the available
-evidence. A partial outcome must explicitly say what is incomplete or unproven.
-The harness exits normally only after every member locally sees the same
-unanimous stop proposal. Hard time/turn limits report an interrupted experiment,
-never success. Fastest conceivable is a research goal, not a provable claim.
+	return `You are ` + actor + `, an independent parser researcher.
+Your private Go module imports your own research/parser package. Other agents
+have separate modules. Your only shared knowledge comes from your local Hearsay
+experiment log. No agent assigns work or controls another agent.
+Read contract/contract.go, parser/parser.go and parser_test.go to learn the fixed
+interface, synthetic workload and encoding/json oracle. Optimize Parse while
+preserving output, errors, exact numeric strings and input ownership. The fixed
+suite is a demonstration, not proof of production compatibility.
+Read new peer entries before choosing your next experiment. Learn from failures
+and build on promising candidates. Announce a hypothesis with try, edit only
+parser/ source files, then evaluate. Evaluate freezes your package, runs trusted
+checks and five benchmark samples against the current best package, and gossips
+source, hashes, measurements and failures. A median improvement greater than
+3 percent promotes a candidate. Benchmark evidence remains subject to host noise.
+Use adopt to copy a visible experiment's parser into your own package and try
+an improvement or independent reproduction. Failed approaches are useful evidence.
+Use post for observations or questions. Use run for local investigation; its
+results are shared automatically. All commands and evaluations share one lane.
+Use status(exhausted=true, body=reason) when you have no useful ideas left.
+This is revisable: new peer evidence can inspire another try, which clears your
+exhaustion status. Do not declare exhaustion with an unfinished experiment.
+The run ends when everyone locally sees all members exhausted and logs converge,
+or at a hard budget. Exhaustion is not a claim of optimality. No votes are needed.
+Use wait for new knowledge; avoid spending turns on acknowledgments or plans.
+Commands run as the local user, not in a sandbox. Do not alter the harness,
+credentials, host settings, Git repositories or other agents' directories.
+Only modify parser/ files using file tools; never modify common checks or contract.
+Use uv run for Python. Keep output small. SIMD and assembly are allowed.
 `
 }
 
@@ -84,15 +72,18 @@ func (b *turnBudget) take() bool {
 
 func (a *agent) run(ctx context.Context, budget *turnBudget) error {
 	history := []json.RawMessage{userItem("Members: " + strings.Join(a.members, ", "))}
+	if a.active != "" {
+		history = append(history, userItem("Continuing saved experiment "+a.active+
+			". Your parser package is retained. Evaluate this attempt before starting another; prior notes arrive through gossip."))
+	}
 	seen := make(map[string]bool)
 	for round := 1; ; round++ {
 		notes, err := readBoard(a.peer)
 		if err != nil {
 			return err
 		}
-		if stopped := stopAgreement(notes, a.members); stopped != "" {
-			a.finished = stopped
-			a.log.print(a.id, "stopped", stopped)
+		if allExhausted(notes, a.members) {
+			a.log.print(a.id, "exhausted", "all peers have exhausted their ideas")
 			return nil
 		}
 		if !budget.take() {
@@ -100,7 +91,7 @@ func (a *agent) run(ctx context.Context, budget *turnBudget) error {
 		}
 		history = append(
 			history,
-			userItem(boardDelta(notes, seen, a.members, a.limits(ctx, round, budget))),
+			userItem(boardDelta(notes, seen, a.limits(ctx, round, budget))),
 		)
 		if err := a.step(ctx, &history, round); err != nil {
 			return err

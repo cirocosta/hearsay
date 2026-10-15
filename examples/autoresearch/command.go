@@ -10,8 +10,10 @@ import (
 )
 
 type executor struct {
-	lane    chan struct{}
-	timeout time.Duration
+	lane      chan struct{}
+	timeout   time.Duration
+	directory string
+	best      note
 }
 
 type commandResult struct {
@@ -78,7 +80,7 @@ func (a *agent) runCommand(ctx context.Context, command string) (string, error) 
 		Command string        `json:"command"`
 		Result  commandResult `json:"result"`
 	}{Command: command, Result: result}))
-	id, err := a.publish(note{Kind: "result", Body: body})
+	id, err := a.publish(note{Kind: "result", Ref: a.active, Body: body})
 	if err != nil {
 		return "", err
 	}

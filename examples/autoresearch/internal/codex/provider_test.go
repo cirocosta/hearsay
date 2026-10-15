@@ -210,3 +210,54 @@ func TestTransientStreamFailureRetriesBeforeExecutingTools(t *testing.T) {
 		t.Fatalf("retry: %q, %d attempts, %v", result.Text, attempts.Load(), err)
 	}
 }
+
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type brokenStream struct{ err error }
+
+func (s brokenStream) Read([]byte) (int, error) { return 0, s.err }
+
+func TestInterruptedTransportDiscardsPartialToolsAndRetries(t *testing.T) {
+	for _, failure := range []error{
+		errors.New("stream error: stream ID 473; INTERNAL_ERROR; received from peer"),
+		io.EOF,
+	} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			path, _ := testLogin(t)
+			client, _ := New(path, "gpt-6-luna", "run")
+			attempts := 0
+			client.client = &http.Client{
+				Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+					attempts++
+					var body io.Reader
+					if attempts == 1 {
+						body = io.MultiReader(strings.NewReader(
+							"data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"partial\",\"name\":\"run\",\"arguments\":\"{}\"}}\n\n",
+						),
+							brokenStream{failure})
+					} else {
+						body = strings.NewReader(
+							"data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"content\":[{\"text\":\"recovered\"}]}]}}\n\n",
+						)
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+						Body:       io.NopCloser(body),
+					}, nil
+				}),
+			}
+			result, err := client.Respond(context.Background(), Request{})
+			if err != nil || result.Text != "recovered" || len(result.Calls) != 0 || attempts != 2 {
+				t.Fatalf(
+					"interrupted turn was not safely retried: %+v, attempts=%d, err=%v",
+					result,
+					attempts,
+					err,
+				)
+			}
+		})
+	}
+}

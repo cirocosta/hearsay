@@ -41,14 +41,19 @@ func toolDefinitions() []toolDefinition {
 			map[string]string{"body": "string"},
 		),
 		defineTool(
-			"propose",
-			"Propose a shared decision on any topic. Topic stop proposes ending the run. No automatic self-vote.",
-			map[string]string{"topic": "string", "body": "string"},
+			"try",
+			"Announce your next hypothesis before editing or running an experiment. Clears exhaustion status.",
+			map[string]string{"body": "string"},
 		),
 		defineTool(
-			"vote",
-			"Agree/disagree with a visible proposal ID, explaining why. Your latest vote replaces your previous vote on that topic.",
-			map[string]string{"ref": "string", "agree": "boolean", "body": "string"},
+			"evaluate",
+			"Freeze your parser package, run common checks and benchmarks, and gossip the experiment with source and results.",
+			map[string]string{"body": "string"},
+		),
+		defineTool(
+			"status",
+			"Report whether you have exhausted useful ideas. You can revise this after new evidence arrives.",
+			map[string]string{"exhausted": "boolean", "body": "string"},
 		),
 		defineTool(
 			"read_file",
@@ -57,7 +62,7 @@ func toolDefinitions() []toolDefinition {
 		),
 		defineTool(
 			"write_file",
-			"Create/replace a UTF-8 file in your research directory, including Go, C, or assembly source.",
+			"Create/replace a UTF-8 source file in your parser/ package.",
 			map[string]string{"path": "string", "content": "string"},
 		),
 		defineTool(
@@ -66,13 +71,8 @@ func toolDefinitions() []toolDefinition {
 			map[string]string{"command": "string"},
 		),
 		defineTool(
-			"share",
-			"Publish source or data files through Hearsay. Paths are newline-separated, total at most 256 KiB. Body describes hypothesis and validation.",
-			map[string]string{"paths": "string", "body": "string"},
-		),
-		defineTool(
 			"adopt",
-			"Import copies of files from a visible shared artifact ID into your own directory. May overwrite your local files.",
+			"Replace your parser package with a frozen candidate from a visible experiment ID.",
 			map[string]string{"ref": "string"},
 		),
 		defineTool(
@@ -84,12 +84,12 @@ func toolDefinitions() []toolDefinition {
 }
 
 type arguments struct {
-	Body    string `json:"body"`
-	Topic   string `json:"topic"`
-	Ref     string `json:"ref"`
-	Agree   bool   `json:"agree"`
-	Path    string `json:"path"`
-	Paths   string `json:"paths"`
+	Body string `json:"body"`
+
+	Ref       string `json:"ref"`
+	Exhausted bool   `json:"exhausted"`
+	Path      string `json:"path"`
+
 	Content string `json:"content"`
 	Command string `json:"command"`
 	Seconds int    `json:"seconds"`
@@ -103,13 +103,15 @@ func (a *agent) use(ctx context.Context, c call) (string, error) {
 	switch c.Name {
 	case "post":
 		return a.publish(note{Kind: "note", Body: args.Body})
-	case "propose":
-		if args.Topic == "" || args.Body == "" {
-			return "", errors.New("proposal needs a topic and body")
+	case "try":
+		return a.beginExperiment(args.Body)
+	case "evaluate":
+		return a.evaluate(ctx, args.Body)
+	case "status":
+		if args.Exhausted && a.active != "" {
+			return "", errors.New("evaluate your active experiment before declaring exhaustion")
 		}
-		return a.publish(note{Kind: "proposal", Topic: args.Topic, Body: args.Body})
-	case "vote":
-		return a.vote(args)
+		return a.publish(note{Kind: "status", Exhausted: args.Exhausted, Body: args.Body})
 	default:
 		return a.workspaceTool(ctx, c.Name, args)
 	}
@@ -152,8 +154,6 @@ func (a *agent) workspaceTool(ctx context.Context, name string, args arguments) 
 		return "written", a.writeFile(args.Path, args.Content)
 	case "run":
 		return a.runCommand(ctx, args.Command)
-	case "share":
-		return a.share(args.Paths, args.Body)
 	case "adopt":
 		return a.adopt(args.Ref)
 	case "wait":
@@ -163,19 +163,20 @@ func (a *agent) workspaceTool(ctx context.Context, name string, args arguments) 
 	}
 }
 
-func (a *agent) vote(args arguments) (string, error) {
-	notes, err := readBoard(a.peer)
-	if err != nil {
+func (a *agent) beginExperiment(body string) (string, error) {
+	if strings.TrimSpace(body) == "" {
+		return "", errors.New("experiment needs a hypothesis")
+	}
+	if a.active != "" {
+		return "", errors.New("evaluate your active experiment before starting another")
+	}
+	if _, err := a.publish(note{Kind: "status", Body: "researching"}); err != nil {
 		return "", err
 	}
-	proposal, err := findNote(notes, args.Ref)
-	if err != nil {
-		return "", err
+	id, err := a.publish(note{Kind: "trying", Body: body})
+	if err == nil {
+		a.active = id
 	}
-	if proposal.Kind != "proposal" {
-		return "", errors.New("votes must reference a proposal")
-	}
-	id, err := a.publish(note{Kind: "vote", Ref: args.Ref, Agree: args.Agree, Body: args.Body})
 	return id, err
 }
 
@@ -206,6 +207,9 @@ func (a *agent) readFile(path string) (string, error) {
 }
 
 func (a *agent) writeFile(path, content string) error {
+	if !packageFile(path) {
+		return errors.New("only parser/ source files can be changed")
+	}
 	if err := safePath(path); err != nil {
 		return err
 	}
@@ -221,30 +225,6 @@ func (a *agent) writeFile(path, content string) error {
 	return a.root.WriteFile(path, []byte(content), 0o600)
 }
 
-func (a *agent) share(paths, body string) (string, error) {
-	files := make(map[string]string)
-	size := 0
-	for _, path := range strings.Split(paths, "\n") {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			continue
-		}
-		text, err := a.readFile(path)
-		if err != nil {
-			return "", err
-		}
-		size += len(text)
-		if size > 256<<10 || len(files) >= 32 {
-			return "", errors.New("artifact exceeds 256 KiB or 32 files")
-		}
-		files[path] = text
-	}
-	if len(files) == 0 {
-		return "", errors.New("share needs at least one path")
-	}
-	return a.publish(note{Kind: "artifact", Body: body, Files: files})
-}
-
 func (a *agent) adopt(id string) (string, error) {
 	notes, err := readBoard(a.peer)
 	if err != nil {
@@ -254,18 +234,20 @@ func (a *agent) adopt(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if artifact.Kind != "artifact" {
-		return "", errors.New("message is not a shared artifact")
+	if artifact.Kind != "experiment" || len(artifact.Files) == 0 {
+		return "", errors.New("message is not an evaluated parser experiment")
 	}
 	for path := range artifact.Files {
-		if err := safePath(path); err != nil {
-			return "", err
+		if !packageFile(path) {
+			return "", errors.New("invalid candidate source path")
 		}
 	}
-	for path, content := range artifact.Files {
-		if err := a.writeFile(path, content); err != nil {
-			return "", err
-		}
+	// replace the entire package so removed files cannot survive adoption.
+	if err := a.root.RemoveAll("parser"); err != nil {
+		return "", err
+	}
+	if err := writePackage(a.root, "parser", artifact.Files); err != nil {
+		return "", err
 	}
 	return fmt.Sprintf("adopted %d files from %s", len(artifact.Files), id), nil
 }

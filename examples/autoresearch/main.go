@@ -15,7 +15,7 @@ import (
 	"github.com/cirocosta/hearsay/examples/autoresearch/internal/codex"
 )
 
-const defaultGoal = `Make parsing Hyperliquid's websocket trades and l2Book JSON streams as fast as you can on this host. Deliver runnable source, a representative corpus, correctness checks, reproducible benchmarks, and evidence for the best candidate. SIMD, assembly, specialized layouts, and any available language/toolchain are allowed. As a swarm, agree on the parsing contract (including numeric precision, ownership and malformed inputs), workload, baseline, metrics, division of work, progress checks, fair repeated comparisons, and stopping criteria. Investigate rather than assuming a particular optimization wins. Distinguish measured improvements from claims about universal optimality. Start with the official websocket schemas: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions.md .`
+const defaultGoal = `Optimize the supplied Go parser for Hyperliquid-style trades and l2Book JSON messages. Independently explore ideas, gossip your experiment log and source, learn from other agents, and reproduce useful findings. Preserve the common contract and correctness checks. Maximize measured throughput on the fixed synthetic corpus; report limitations rather than claiming universal optimality.`
 
 type config struct {
 	Agents         int           `json:"agents"`
@@ -26,6 +26,7 @@ type config struct {
 	Turns          int           `json:"turns"`
 	CommandTimeout time.Duration `json:"command_timeout"`
 	AuthFile       string        `json:"-"`
+	Resume         string        `json:"resume,omitempty"`
 }
 
 func main() {
@@ -49,6 +50,12 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	f.StringVar(&cfg.Model, "model", "gpt-6-luna", "Codex model used by every agent")
 	f.StringVar(&cfg.Goal, "goal", defaultGoal, "the swarm's shared goal")
 	f.StringVar(
+		&cfg.Resume,
+		"resume",
+		"",
+		"previous run whose notebook and parser packages should be retained",
+	)
+	f.StringVar(
 		&cfg.Directory,
 		"dir",
 		filepath.Join(
@@ -70,7 +77,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		20*time.Minute,
 		"hard run ceiling, independent of agent stopping decisions",
 	)
-	f.IntVar(&cfg.Turns, "turns", 640, "maximum model turns across the entire swarm")
+	f.IntVar(&cfg.Turns, "turns", 5000, "maximum model turns across the entire swarm")
 	f.DurationVar(
 		&cfg.CommandTimeout,
 		"command-timeout",

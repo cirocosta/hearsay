@@ -1,0 +1,30 @@
+// Package contract defines the common parser output.
+package contract
+
+type Trade struct {
+	Coin string `json:"coin"`
+	Side string `json:"side"`
+	Px   string `json:"px"`
+	Sz   string `json:"sz"`
+	Time int64  `json:"time"`
+	Hash string `json:"hash"`
+	Tid  int64  `json:"tid"`
+}
+
+type Level struct {
+	Px string `json:"px"`
+	Sz string `json:"sz"`
+	N  int    `json:"n"`
+}
+
+type Book struct {
+	Coin   string     `json:"coin"`
+	Time   int64      `json:"time"`
+	Levels [2][]Level `json:"levels"`
+}
+
+type Message struct {
+	Channel string
+	Trades  []Trade
+	Book    Book
+}

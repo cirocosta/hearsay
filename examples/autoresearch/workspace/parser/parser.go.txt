@@ -1,0 +1,30 @@
+// Package parser decodes the supported websocket messages.
+package parser
+
+import (
+	"encoding/json"
+	"fmt"
+
+	"research/contract"
+)
+
+func Parse(data []byte) (contract.Message, error) {
+	var envelope struct {
+		Channel string          `json:"channel"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return contract.Message{}, err
+	}
+	result := contract.Message{Channel: envelope.Channel}
+	var err error
+	switch envelope.Channel {
+	case "trades":
+		err = json.Unmarshal(envelope.Data, &result.Trades)
+	case "l2Book":
+		err = json.Unmarshal(envelope.Data, &result.Book)
+	default:
+		err = fmt.Errorf("unsupported channel %q", envelope.Channel)
+	}
+	return result, err
+}

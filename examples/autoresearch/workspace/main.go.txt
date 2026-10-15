@@ -1,0 +1,25 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+
+	"research/parser"
+)
+
+func main() {
+	data, err := io.ReadAll(os.Stdin)
+	if err == nil {
+		var message any
+		message, err = parser.Parse(data)
+		if err == nil {
+			err = json.NewEncoder(os.Stdout).Encode(message)
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
