@@ -30,7 +30,8 @@ Each direction verifies:
 
 - Bootstrap from a provider with existing data.
 - Forty independent concurrent sends per side.
-- One 1-MiB payload per side, exceeding the target frame size.
+- One 1-MiB payload per side. Minimum configurations use a zero target, so
+  these records exceed the negotiated frame target there.
 - Concurrent redactions of messages originating on the opposite side.
 - Transitive deletion through a Rust-Go-Rust relay.
 - 270 consecutive sessions on one link, with sparse sends and fresh data at
@@ -50,16 +51,16 @@ one byte; the repository's transport conformance tests cover bounded streams.
 
 Environment variables apply to `./interop/run.sh`:
 
-| Variable | Effect |
-| --- | --- |
-| `HEARSAY_INTEROP_MINIMAL=1` | Go memory budget 1, target message size 0 |
+| Variable                                 | Effect                                                                                                                       |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `HEARSAY_INTEROP_MINIMAL=1`              | Go memory budget 1, target message size 0                                                                                    |
 | `HEARSAY_INTEROP_MEMORY_BUDGET=16777216` | Explicit Go memory budget in decimal bytes (16 MiB here); overrides the minimal flag's budget, preserving its target setting |
-| `RUST_INTEROP_MINIMAL=1` | Rust memory budget 1, target message size 0 |
-| `HEARSAY_INTEROP_EMPTY=1` | Start with an empty bootstrap provider |
-| `HEARSAY_INTEROP_RACE=1` | Run the Go participant under the race detector |
-| `HEARSAY_INTEROP_PROVIDER=go` or `rust` | Run one provider direction |
-| `HEARSAY_INTEROP_DEBUG=1` | Write a goroutine dump after five seconds |
-| `HEARSAY_INTEROP_STACK_FILE=/path` | Override the dump path |
+| `RUST_INTEROP_MINIMAL=1`                 | Rust memory budget 1, target message size 0                                                                                  |
+| `HEARSAY_INTEROP_EMPTY=1`                | Start with an empty bootstrap provider                                                                                       |
+| `HEARSAY_INTEROP_RACE=1`                 | Run the Go participant under the race detector                                                                               |
+| `HEARSAY_INTEROP_PROVIDER=go` or `rust`  | Run one provider direction                                                                                                   |
+| `HEARSAY_INTEROP_DEBUG=1`                | Write a goroutine dump after five seconds                                                                                    |
+| `HEARSAY_INTEROP_STACK_FILE=/path`       | Override the dump path                                                                                                       |
 
 A complete matrix uses default settings, each minimum-budget direction,
 both endpoints at minimum budget, and empty providers. For example:

@@ -67,7 +67,8 @@ existing member runs `GossipOnce` on the other link half. Independently seeded
 peers belong to different networks. See the executable
 [bootstrap and redaction example](example_test.go).
 
-Custom codecs must provide `Encode`, `DecodeBounded`, and `Equal`.
+Custom codecs must provide `Encode` and `DecodeBounded`. Equality defaults to
+`reflect.DeepEqual`; provide `Equal` when the payload needs different semantics.
 `DecodeBounded` must enforce the payload type's decoding recursion budget;
 generic CBOR nesting depth does not match Rust's typed decoding rules. The
 built-in `BytesCodec` and `JSONCodec` use CBOR byte-string envelopes.
