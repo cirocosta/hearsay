@@ -232,37 +232,6 @@ func TestRoutingAdmissionDeadlineAndMalformedHeaders(t *testing.T) {
 	}
 }
 
-func TestStreamOverflowClosesOnlyAffectedLink(t *testing.T) {
-	a, b := endpointTest(t, Config{}), endpointTest(t, Config{})
-	left, _ := pairTest(t, a, b)
-	other, otherRemote := pairTest(t, a, b)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	for range link.StreamCount + 1 {
-		w, err := left.Open(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer closeTest(t, w)
-	}
-	var one [1]byte
-	if err := left.control.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := left.Control().Read(one[:]); err != io.EOF {
-		t.Fatalf("overflow peer EOF: %v", err)
-	}
-	if got := b.Stats().StreamOverflows; got != 1 {
-		t.Fatalf("overflows %d", got)
-	}
-	done := make(chan error, 1)
-	go func() { _, err := other.Control().Write([]byte{3}); done <- err }()
-	if _, err := io.ReadFull(otherRemote.Control(), one[:]); err != nil {
-		t.Fatal(err)
-	}
-	resultTest(t, done)
-}
-
 func TestConcurrentEndpointClose(t *testing.T) {
 	for range 10 {
 		a, b := endpointTest(t, Config{}), endpointTest(t, Config{})

@@ -130,12 +130,13 @@ func (l *Link) removeIdle(conn net.Conn) {
 func (l *Link) completeIncoming(conn net.Conn) {
 	l.mu.Lock()
 	_, tracked := l.conns[conn]
-	if l.closed || !tracked || l.incomingIdle >= link.StreamCount {
+	if l.closed || l.supplyFailed || !tracked || l.incomingIdle >= link.StreamCount {
 		l.mu.Unlock()
 		l.release(conn)
 		return
 	}
 	l.incomingIdle++
+	l.reusing = append(l.reusing, conn)
 	l.workers.Add(1)
 	l.mu.Unlock()
 	go l.awaitReuse(conn)
@@ -144,10 +145,7 @@ func (l *Link) completeIncoming(conn net.Conn) {
 func (l *Link) awaitReuse(conn net.Conn) {
 	defer l.workers.Done()
 	h, err := reuseHeader(conn)
-	l.mu.Lock()
-	l.incomingIdle--
-	closed := l.closed
-	l.mu.Unlock()
+	closed := l.finishReuse(conn)
 	if err != nil || closed {
 		l.release(conn)
 		return
@@ -160,10 +158,25 @@ func (l *Link) awaitReuse(conn net.Conn) {
 	if err = l.deliver(conn); err != nil {
 		l.release(conn)
 		if err == errStreamOverflow {
-			l.endpoint.streamOverflows.Add(1)
-			l.shutdown()
+			l.failIncoming()
 		}
 	}
+}
+
+func (l *Link) finishReuse(conn net.Conn) bool {
+	l.mu.Lock()
+	l.incomingIdle--
+	for i, waiting := range l.reusing {
+		if waiting == conn {
+			copy(l.reusing[i:], l.reusing[i+1:])
+			l.reusing[len(l.reusing)-1] = nil
+			l.reusing = l.reusing[:len(l.reusing)-1]
+			break
+		}
+	}
+	closed := l.closed || l.supplyFailed
+	l.mu.Unlock()
+	return closed
 }
 
 func reuseHeader(conn net.Conn) (header, error) {

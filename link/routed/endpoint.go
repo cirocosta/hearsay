@@ -54,6 +54,7 @@ type Endpoint struct {
 	closed          bool
 	failure         error
 	links           map[Token]*Link
+	detached        map[*Link]struct{}
 	conns           map[net.Conn]struct{}
 	incoming        []*Link
 	reserved        int
@@ -174,8 +175,7 @@ func (e *Endpoint) route(conn net.Conn) {
 	if err := l.deliver(conn); err != nil {
 		e.closeConn(conn)
 		if errors.Is(err, errStreamOverflow) {
-			e.streamOverflows.Add(1)
-			_ = l.Close()
+			l.failIncoming()
 		}
 	}
 }
@@ -348,8 +348,11 @@ func (e *Endpoint) shutdown(err error) {
 	for c := range e.conns {
 		conns = append(conns, c)
 	}
-	links := make([]*Link, 0, len(e.links))
+	links := make([]*Link, 0, len(e.links)+len(e.detached))
 	for _, l := range e.links {
+		links = append(links, l)
+	}
+	for l := range e.detached {
 		links = append(links, l)
 	}
 	e.incoming = nil
