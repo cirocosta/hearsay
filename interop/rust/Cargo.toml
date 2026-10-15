@@ -1,0 +1,12 @@
+[package]
+name = "rumors-interop"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+rumors = { path = "../../.agi.local/repositories/rumors" }
+before = { path = "../../.agi.local/repositories/rumors/crates/before" }
+bytes = { version = "1", features = ["serde"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-std", "io-util", "macros", "sync", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
