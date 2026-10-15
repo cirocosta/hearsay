@@ -119,7 +119,11 @@ func (c Codec[T]) encode(v T) ([]byte, error) {
 	if limit == 0 {
 		limit = DefaultPayloadDepthLimit
 	}
-	if err := cbor.ValidateItem(owned, cbor.Limits{MaxDepth: limit}); err != nil {
+	if err := cbor.ValidateItem(owned, cbor.Limits{
+		MaxDepth: limit,
+		MaxBytes: max(1, len(owned)),
+		MaxItems: max(1, len(owned)),
+	}); err != nil {
 		return nil, fmt.Errorf("hearsay: admit CBOR payload: %w", err)
 	}
 	decoded, err := c.Decode(bytes.Clone(owned))
