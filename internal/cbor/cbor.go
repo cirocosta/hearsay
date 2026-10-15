@@ -160,6 +160,45 @@ func ReadHead(r io.Reader) (Head, error) {
 	return head, err
 }
 
+// ReadByteHead reads one canonical head from an existing byte reader without
+// allocating a temporary buffer. It has the same EOF semantics as ReadHead.
+func ReadByteHead(r io.ByteReader) (Head, error) {
+	initial, err := r.ReadByte()
+	if err != nil {
+		return Head{}, err
+	}
+	width, err := extensionLen(initial)
+	if err != nil {
+		return Head{}, err
+	}
+	value := uint64(initial & 31)
+	if width != 0 {
+		value, err = readByteValue(r, width)
+		if err != nil {
+			return Head{}, err
+		}
+	}
+	if HeadLen(value) != width+1 {
+		return Head{}, ErrNotShortest
+	}
+	return Head{initial >> 5, value}, nil
+}
+
+func readByteValue(r io.ByteReader, width int) (uint64, error) {
+	var value uint64
+	for range width {
+		b, err := r.ReadByte()
+		if err != nil {
+			if err == io.EOF {
+				err = io.ErrUnexpectedEOF
+			}
+			return 0, err
+		}
+		value = value<<8 | uint64(b)
+	}
+	return value, nil
+}
+
 // WriteHead writes a canonical head. A short write without an error is reported
 // as io.ErrShortWrite.
 func WriteHead(w io.Writer, major uint8, value uint64) error {
