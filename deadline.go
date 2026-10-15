@@ -46,7 +46,7 @@ func (b *BootstrapConfig[T]) WithSessionDeadline(deadline *time.Duration) *Boots
 func (p *Peer[T]) SessionDeadline() *time.Duration { return p.state.configuredDeadline() }
 
 // SessionDeadline returns a copy of this replica's active session duration.
-func (r *Rumors[T]) SessionDeadline() *time.Duration { return r.state.configuredDeadline() }
+func (r *Replica[T]) SessionDeadline() *time.Duration { return r.state.configuredDeadline() }
 
 // SessionDeadline returns a copy of this bootstrap's active session duration.
 func (b *BootstrapConfig[T]) SessionDeadline() *time.Duration { return copyDeadline(b.sessionDeadline) }

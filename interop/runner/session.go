@@ -26,7 +26,7 @@ type scenario struct {
 	endpoint *routed.Endpoint
 	address  string
 	carrier  *link.Managed
-	rumors   *h.Rumors[[]byte]
+	replica  *h.Replica[[]byte]
 	victim   h.Version
 	dials    *atomic.Uint64
 	opened   uint64
@@ -134,7 +134,7 @@ func bootstrap() (*h.BootstrapConfig[[]byte], error) {
 	return b.WithSynchronizationSettings(settings)
 }
 
-func seed() (*h.Rumors[[]byte], error) {
+func seed() (*h.Replica[[]byte], error) {
 	p, err := h.Seed(h.BytesCodec())
 	if err != nil {
 		return nil, err
@@ -147,7 +147,7 @@ func seed() (*h.Rumors[[]byte], error) {
 	if err != nil {
 		return nil, err
 	}
-	return p.IntoRumors()
+	return p.IntoReplica()
 }
 
 func settingsFromEnv(settings h.SynchronizationSettings) (h.SynchronizationSettings, error) {
@@ -180,20 +180,20 @@ func (s *scenario) join() error {
 	if joined.Peer == nil {
 		return fmt.Errorf("bootstrap returned no peer")
 	}
-	s.rumors, err = joined.Peer.IntoRumors()
+	s.replica, err = joined.Peer.IntoReplica()
 	return err
 }
 
 func (s *scenario) gossip() error {
-	result, err := s.rumors.GossipOnce(s.ctx, s.carrier)
+	result, err := s.replica.GossipOnce(s.ctx, s.carrier)
 	s.opened += result.Stats.StreamsOpened
 	s.window = max(s.window, result.Stats.WindowGranted)
 	return err
 }
 func (s *scenario) sync() error     { return s.rust.pair("gossip", s.gossip) }
-func (s *scenario) check() error    { return check(s.rust, s.rumors) }
+func (s *scenario) check() error    { return check(s.rust, s.replica) }
 func hexVersion(v h.Version) string { b, _ := v.MarshalBinary(); return hex.EncodeToString(b) }
-func check(r *rust, goPeer *h.Rumors[[]byte]) error {
+func check(r *rust, goPeer *h.Replica[[]byte]) error {
 	state, err := r.op("list")
 	if err != nil {
 		return err

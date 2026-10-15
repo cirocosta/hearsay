@@ -52,7 +52,7 @@ func (b *faultBookmark) Store(ctx context.Context, value []byte) error {
 	return b.data.Store(ctx, value)
 }
 
-func attachedBytes(t *testing.T, storage bookmark.Storage) *Rumors[[]byte] {
+func attachedBytes(t *testing.T, storage bookmark.Storage) *Replica[[]byte] {
 	t.Helper()
 	p, err := Seed(BytesCodec())
 	if err != nil {
@@ -61,7 +61,7 @@ func attachedBytes(t *testing.T, storage bookmark.Storage) *Rumors[[]byte] {
 	if err := p.AttachBookmark(t.Context(), storage); err != nil {
 		t.Fatal(err)
 	}
-	r, err := p.IntoRumors()
+	r, err := p.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestBookmarkAttachFailurePreservesPeer(t *testing.T) {
 	if err := p.AttachBookmark(t.Context(), storage); !errors.Is(err, ErrBookmarkAttached) {
 		t.Fatal(err)
 	}
-	handle, err := p.IntoRumors()
+	handle, err := p.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestBookmarkRestartReclaimsCaughtUpIdentity(t *testing.T) {
 	storage := new(bookmark.Memory)
 	old := attachedBytes(t, storage)
 	remotePeer := bootstrapBytes(t, old)
-	remote, err := remotePeer.IntoRumors()
+	remote, err := remotePeer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}

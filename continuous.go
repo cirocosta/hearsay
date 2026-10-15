@@ -47,7 +47,7 @@ type GossipOptions[T any] struct {
 // The driver retains one writable handle until it ends. The source handle may
 // be closed after iteration begins. Sessions suppress their own merge signal;
 // concurrent local updates beyond Converged still trigger another exchange.
-func (r *Rumors[T]) Gossip(
+func (r *Replica[T]) Gossip(
 	ctx context.Context,
 	carrier *link.Managed,
 	options GossipOptions[T],
@@ -84,7 +84,7 @@ func (r *Rumors[T]) Gossip(
 }
 
 type continuousDriver[T any] struct {
-	peer      *Rumors[T]
+	peer      *Replica[T]
 	carrier   *link.Managed
 	changes   *Changes[T]
 	requests  <-chan GossipRequest

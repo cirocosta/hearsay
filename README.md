@@ -1,46 +1,29 @@
-# hearsay
+# Hearsay
 
-A clean slate Go port of [oxidecomputer/rumors](https://github.com/oxidecomputer/rumors),
-a causal gossip library with tombstone-free message redaction.
+Hearsay is a Go library for replicating messages between peers through causal
+gossip. Peers exchange differences and converge after reconnecting. Redaction
+removes messages without retaining a tombstone for each deleted message.
 
-The implementation and its compatibility gates target upstream revision
-`bf2ba264e2360eab1ba5f06148ea3ef3050825c8`.
+## Features
 
-The target design uses interval tree clocks, immutable snapshots of a compressed
-Merkle radix trie, and bounded reconciliation over independent data streams.
-Performance changes require reproducible benchmarks and correctness checks.
+- Causal versions distinguish concurrent messages from observed deletions.
+- Immutable snapshots support lookup, iteration, and causal queries.
+- Atomic sends, redactions, and batches publish consistent changes.
+- Resumable observers deliver messages in unordered or causal order.
+- Bounded streaming reconciliation works over memory links or routed TCP.
+- Bootstrap, retirement, and durable bookmarks manage peer identity ownership.
+- Continuous gossip, active-session deadlines, and wire observers support services.
 
-Requires Go 1.27.1 or later.
+## Quick start
 
-The current implementation includes interval tree clocks, a persistent Merkle
-trie, atomic local batches and snapshots, resumable message observers, independent
-memory and routed socket streams, bounded V2 reconciliation, bootstrap and
-retirement, continuous gossip, active session deadlines, wire observers, and
-durable bookmark recovery. See
-[PORTING.md](PORTING.md) for the complete acceptance gates.
-
-Run `make check` for tests, race checks, vet, and lint. Lint and formatting require
-`golangci-lint` v2. Run `make bench` for the benchmark suite. Performance comparisons
-must run without concurrent builds or tests; pin both variants to the same CPU.
-Run `make interop` for the explicit Rust-Go verifier. It needs Rust and initial
-network access; ordinary Go tests do not. See [interop/README.md](interop/README.md)
-for the configuration matrix and [PERFORMANCE.md](PERFORMANCE.md) for measured
-gains and tradeoffs.
-
-The regular network benchmark matrix keeps each session within a one-minute
-deadline. It tests the one-slot floor on a 1,000-message set with 100 new
-messages per side over a 100 ms link. The 100,000-message case retains floor
-coverage on CPU and 1 ms links. Large sets at the floor over 20-100 ms links
-are stress workloads and are excluded from the regular matrix.
-
-For a local replica:
+Requires Go 1.27.1 or later. Import `github.com/cirocosta/hearsay`.
 
 ```go
 peer, err := hearsay.Seed(hearsay.BytesCodec())
 if err != nil {
     return err
 }
-replica, err := peer.IntoRumors()
+replica, err := peer.IntoReplica()
 if err != nil {
     return err
 }
@@ -54,21 +37,33 @@ snapshot := replica.Snapshot()
 if err := replica.Redact(version); err != nil {
     return err
 }
-// The retained snapshot still contains the message.
-_ = snapshot
+fmt.Println(snapshot.Len(), replica.Snapshot().Len()) // 1 0
 ```
 
-`Clone` creates another independently closable writable handle. Ordinary Go
-copies share a lifetime token. Recovering a `Peer` requires releasing the other
-handles. Snapshots and observers do not retain identity ownership.
+`Peer[T]` owns an identity exclusively. `IntoReplica` consumes it and returns a
+shared writable `Replica[T]`. Use `Clone` for independently closable handles;
+ordinary Go copies share a lifetime token. `TryIntoPeer` or `IntoPeer` recovers
+exclusive ownership after the other handles are released.
 
-Create another member with `Bootstrap(codec).Join(ctx, managedLink)` while an
-existing member runs `GossipOnce` on the other link half. Independently seeded
-peers belong to different networks. See the executable
-[bootstrap and redaction example](example_test.go).
+To add a member, call `Bootstrap(codec).Join` while an existing member runs
+`GossipOnce` on the other end of a managed link. Independently seeded peers
+belong to different networks. The executable [example](example_test.go) shows
+bootstrap, message exchange, and redaction.
 
-Custom codecs must provide `Encode` and `DecodeBounded`. Equality defaults to
-`reflect.DeepEqual`; provide `Equal` when the payload needs different semantics.
-`DecodeBounded` must enforce the payload type's decoding recursion budget;
-generic CBOR nesting depth does not match Rust's typed decoding rules. The
-built-in `BytesCodec` and `JSONCodec` use CBOR byte-string envelopes.
+`BytesCodec` and `JSONCodec` use CBOR byte-string envelopes. Custom codecs must
+provide `Encode` and `DecodeBounded`, including typed recursion enforcement.
+Equality defaults to `reflect.DeepEqual`; override `Equal` when needed.
+
+## Development
+
+```sh
+make check    # tests, race detector, vet, and golangci-lint v2
+make bench    # local and network-model benchmarks
+make interop  # Rust-Go compatibility checks; requires Rust and initial network access
+```
+
+See [PERFORMANCE.md](PERFORMANCE.md) for measurements and memory-budget limits,
+[PORTING.md](PORTING.md) for the compatibility contract, and
+[interop/README.md](interop/README.md) for verifier setup.
+
+Hearsay is inspired by Oxide's [rumors](https://github.com/oxidecomputer/rumors).

@@ -41,14 +41,14 @@ func (p *Peer[T]) SynchronizationSettings() SynchronizationSettings {
 }
 
 // SynchronizationSettings returns this replica's session parameters.
-func (r *Rumors[T]) SynchronizationSettings() SynchronizationSettings {
+func (r *Replica[T]) SynchronizationSettings() SynchronizationSettings {
 	r.state.mu.Lock()
 	defer r.state.mu.Unlock()
 	return r.state.settings
 }
 
 // WithSynchronizationSettings configures an exclusively owned peer. Once
-// IntoRumors consumes it, configuration through old peer copies is rejected.
+// IntoReplica consumes it, configuration through old peer copies is rejected.
 func (p *Peer[T]) WithSynchronizationSettings(settings SynchronizationSettings) (*Peer[T], error) {
 	if p == nil || p.state == nil {
 		return nil, ErrClosed

@@ -26,7 +26,7 @@ func TestInheritedZeroDeadlineStartsActiveGossip(t *testing.T) {
 	if err := peer.AttachObserver(recorder); err != nil {
 		t.Fatal(err)
 	}
-	live, err := peer.IntoRumors()
+	live, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestInheritedZeroRetirementDeadlineRecoversIdentity(t *testing.T) {
 		!errors.Is(result.Err, context.DeadlineExceeded) {
 		t.Fatalf("retirement deadline: %+v", result)
 	}
-	if _, err := peer.IntoRumors(); !errors.Is(err, ErrClosed) {
+	if _, err := peer.IntoReplica(); !errors.Is(err, ErrClosed) {
 		t.Fatal("consumed retirement token became usable")
 	}
 	if _, err := result.Peer.WithSessionDeadline(nil); err != nil {
@@ -94,7 +94,7 @@ func TestInheritedZeroRetirementDeadlineRecoversIdentity(t *testing.T) {
 	if result.Peer.SessionDeadline() != nil {
 		t.Fatal("nil did not disable deadline")
 	}
-	live, err := result.Peer.IntoRumors()
+	live, err := result.Peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}

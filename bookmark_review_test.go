@@ -82,7 +82,7 @@ func TestBookmarkReviewDonationRemovedBeforeIdentityWrite(t *testing.T) {
 	if err := peer.AttachBookmark(t.Context(), storage); err != nil {
 		t.Fatal(err)
 	}
-	source, err := peer.IntoRumors()
+	source, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestBookmarkReviewDonationRemovedBeforeIdentityWrite(t *testing.T) {
 }
 
 func reviewDonationRecord(
-	source *Rumors[[]byte],
+	source *Replica[[]byte],
 	storage *bookmarkReviewStorage,
 	wire []byte,
 ) error {
@@ -230,7 +230,7 @@ func TestBookmarkReviewBootstrapAttachmentFailurePreservesCustody(t *testing.T) 
 	if err := joined.Peer.AttachBookmark(ctx, storage); err != nil {
 		t.Fatal(err)
 	}
-	live, err := joined.Peer.IntoRumors()
+	live, err := joined.Peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestBookmarkReviewCancelledDonationReloadsBeforeRetry(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				probeSource := &Rumors[[]byte]{state: peer.state}
+				probeSource := &Replica[[]byte]{state: peer.state}
 				if err := reviewDonationRecord(probeSource, storage, wire); err != nil {
 					t.Fatal(err)
 				}

@@ -6,13 +6,13 @@ import (
 	"testing"
 )
 
-func benchmarkReplica(b *testing.B, size int) *Rumors[[]byte] {
+func benchmarkReplica(b *testing.B, size int) *Replica[[]byte] {
 	b.Helper()
 	peer, err := SeedFrom(bytes.NewReader(bytes.Repeat([]byte{1}, 16)), BytesCodec())
 	if err != nil {
 		b.Fatal(err)
 	}
-	r, err := peer.IntoRumors()
+	r, err := peer.IntoReplica()
 	if err != nil {
 		b.Fatal(err)
 	}

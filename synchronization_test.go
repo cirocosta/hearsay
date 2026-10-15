@@ -26,7 +26,7 @@ func TestTypedDecoderReceivesExactConfiguredBound(t *testing.T) {
 	if _, err := peer.WithSynchronizationSettings(settings); err != nil {
 		t.Fatal(err)
 	}
-	r, err := peer.IntoRumors()
+	r, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestTypedDecoderReceivesExactConfiguredBound(t *testing.T) {
 	if _, err := recovered.WithSynchronizationSettings(settings); err != nil {
 		t.Fatal(err)
 	}
-	live, err := recovered.IntoRumors()
+	live, err := recovered.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestTypedDecoderCanSkipTagsAtZeroDepth(t *testing.T) {
 	if _, err := peer.WithSynchronizationSettings(settings); err != nil {
 		t.Fatal(err)
 	}
-	source, err := peer.IntoRumors()
+	source, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestTypedDecoderCanSkipTagsAtZeroDepth(t *testing.T) {
 	if err := <-served; err != nil {
 		t.Fatal(err)
 	}
-	live, err := joined.Peer.IntoRumors()
+	live, err := joined.Peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}

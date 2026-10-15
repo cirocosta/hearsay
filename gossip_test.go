@@ -22,7 +22,7 @@ func managedPair(t *testing.T) (*link.Managed, *link.Managed) {
 	return near, far
 }
 
-func bootstrapBytes(t *testing.T, source *Rumors[[]byte]) *Peer[[]byte] {
+func bootstrapBytes(t *testing.T, source *Replica[[]byte]) *Peer[[]byte] {
 	t.Helper()
 	near, far := managedPair(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -42,7 +42,7 @@ func bootstrapBytes(t *testing.T, source *Rumors[[]byte]) *Peer[[]byte] {
 	return joined.Peer
 }
 
-func gossipPair(t *testing.T, a, b *Rumors[[]byte], near, far *link.Managed) (Gossiped, Gossiped) {
+func gossipPair(t *testing.T, a, b *Replica[[]byte], near, far *link.Managed) (Gossiped, Gossiped) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -70,7 +70,7 @@ func TestBootstrapGossipRedactionAndReuse(t *testing.T) {
 		t.Fatal(err)
 	}
 	peer := bootstrapBytes(t, a)
-	b, err := peer.IntoRumors()
+	b, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestNetworkMismatchPoisonsWithoutChangingState(t *testing.T) {
 func TestRetireTransfersExclusiveIdentity(t *testing.T) {
 	a := seededBytes(t)
 	peer := bootstrapBytes(t, a)
-	b, err := peer.IntoRumors()
+	b, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestRetireTransfersExclusiveIdentity(t *testing.T) {
 	if a.Snapshot().Len() != 1 {
 		t.Fatal("retirement lost departing content")
 	}
-	if _, err := retiring.IntoRumors(); !errors.Is(err, ErrClosed) {
+	if _, err := retiring.IntoReplica(); !errors.Is(err, ErrClosed) {
 		t.Fatal("retiree reused identity")
 	}
 }
@@ -200,7 +200,7 @@ func TestRetireTransfersExclusiveIdentity(t *testing.T) {
 func TestMutualRetirementDeclinesWithoutMutation(t *testing.T) {
 	a := seededBytes(t)
 	peer := bootstrapBytes(t, a)
-	b, err := peer.IntoRumors()
+	b, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestRetirementFailureBeforeHandoffRecovers(t *testing.T) {
 	if outcome.Status != RetirementRecovered || outcome.Peer == nil || outcome.Err == nil {
 		t.Fatalf("failed retirement: %+v", outcome)
 	}
-	live, err := outcome.Peer.IntoRumors()
+	live, err := outcome.Peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestRetirementFailureAfterHandoffIsUncertain(t *testing.T) {
 	if outcome.Status != RetirementUncertain || outcome.Peer != nil || outcome.Err == nil {
 		t.Fatalf("uncertain retirement: %+v", outcome)
 	}
-	if _, err := peer.IntoRumors(); !errors.Is(err, ErrClosed) {
+	if _, err := peer.IntoReplica(); !errors.Is(err, ErrClosed) {
 		t.Fatal("uncertain retiree resumed")
 	}
 }
@@ -346,7 +346,7 @@ func TestGossipPreservesConcurrentLocalCommits(t *testing.T) {
 		t.Fatal(err)
 	}
 	peer := bootstrapBytes(t, a)
-	b, err := peer.IntoRumors()
+	b, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +414,7 @@ func (c *failCompletionControl) Write(p []byte) (int, error) {
 func TestCompletionFailureRetainsCommittedGossip(t *testing.T) {
 	a := seededBytes(t)
 	peer := bootstrapBytes(t, a)
-	b, err := peer.IntoRumors()
+	b, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +479,7 @@ func TestRetireIntoBootstrapTransfersWholeIdentity(t *testing.T) {
 	if joined.Peer == nil || !joined.Peer.state.party.IsSeed() {
 		t.Fatal("retiring provider did not transfer whole identity")
 	}
-	live, err := joined.Peer.IntoRumors()
+	live, err := joined.Peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}

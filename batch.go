@@ -64,7 +64,7 @@ func (b *Batch[T]) RedactAll(versions []Version) error {
 }
 
 // Send commits one admitted payload and returns its unique causal version.
-func (r *Rumors[T]) Send(payload T) (Version, error) {
+func (r *Replica[T]) Send(payload T) (Version, error) {
 	if r == nil || r.state == nil {
 		return Version{}, ErrClosed
 	}
@@ -84,18 +84,18 @@ func (r *Rumors[T]) Send(payload T) (Version, error) {
 }
 
 // Redact removes a live message. An absent version makes no change to history.
-func (r *Rumors[T]) Redact(version Version) error {
+func (r *Replica[T]) Redact(version Version) error {
 	_, err := r.commit([]action{{version: version}})
 	return err
 }
 
 // SendAll admits and publishes all payloads in one atomic commit.
-func (r *Rumors[T]) SendAll(payloads []T) error {
+func (r *Replica[T]) SendAll(payloads []T) error {
 	return r.Batch(func(b *Batch[T]) error { return b.SendAll(payloads) })
 }
 
 // RedactAll removes live supplied versions in one atomic commit.
-func (r *Rumors[T]) RedactAll(versions []Version) error {
+func (r *Replica[T]) RedactAll(versions []Version) error {
 	return r.Batch(func(b *Batch[T]) error { return b.RedactAll(versions) })
 }
 
@@ -103,7 +103,7 @@ func (r *Rumors[T]) RedactAll(versions []Version) error {
 // Concurrent operations can commit while prepare runs. Action versions follow
 // callback order, including ticks for absent redactions; only effective actions
 // contribute to the published frontier.
-func (r *Rumors[T]) Batch(prepare func(*Batch[T]) error) error {
+func (r *Replica[T]) Batch(prepare func(*Batch[T]) error) error {
 	if r == nil || r.state == nil {
 		return ErrClosed
 	}
@@ -126,7 +126,7 @@ func (r *Rumors[T]) Batch(prepare func(*Batch[T]) error) error {
 	return err
 }
 
-func (r *Rumors[T]) commit(actions []action) (before.Version, error) {
+func (r *Replica[T]) commit(actions []action) (before.Version, error) {
 	if r == nil || r.state == nil {
 		return Version{}, ErrClosed
 	}

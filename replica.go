@@ -1,4 +1,4 @@
-// Package hearsay provides a causally versioned replicated message set.
+// Package hearsay provides causal gossip with tombstone-free message redaction.
 package hearsay
 
 import (
@@ -173,16 +173,17 @@ type (
 )
 
 // Peer holds exclusive identity ownership. Copies share one consumption token.
-// IntoRumors consumes the peer; TryIntoPeer or IntoPeer recovers it later.
+// IntoReplica consumes the peer; TryIntoPeer or IntoPeer recovers it later.
 type Peer[T any] struct {
 	state *replica[T]
 	token *peerToken
 }
 
-// Rumors is a synchronized writable replica handle. Ordinary Go copies share
-// one lifetime token. Clone creates an independently closable handle; Close
-// releases it. Snapshots retain content without retaining identity ownership.
-type Rumors[T any] struct {
+// Replica is a synchronized writable handle to a Hearsay message set.
+// Ordinary Go copies share one lifetime token. Clone creates an independently
+// closable handle; Close releases it. Snapshots retain content without retaining
+// identity ownership.
+type Replica[T any] struct {
 	state      *replica[T]
 	token      *handleToken
 	generation *generation
@@ -232,8 +233,8 @@ func newPeer[T any](
 // Network returns the causal universe of this peer.
 func (p *Peer[T]) Network() Network { return p.state.network }
 
-// IntoRumors consumes exclusive peer ownership and creates one live handle.
-func (p *Peer[T]) IntoRumors() (*Rumors[T], error) {
+// IntoReplica consumes exclusive peer ownership and creates one live handle.
+func (p *Peer[T]) IntoReplica() (*Replica[T], error) {
 	if p == nil || p.state == nil || p.token == nil {
 		return nil, ErrClosed
 	}
@@ -246,18 +247,18 @@ func (p *Peer[T]) IntoRumors() (*Rumors[T], error) {
 	p.token.alive = false
 	g := &generation{refs: 1, done: make(chan struct{})}
 	s.generation = g
-	return &Rumors[T]{state: s, token: &handleToken{alive: true}, generation: g}, nil
+	return &Replica[T]{state: s, token: &handleToken{alive: true}, generation: g}, nil
 }
 
-func (r *Rumors[T]) aliveLocked() bool {
+func (r *Replica[T]) aliveLocked() bool {
 	return r != nil && r.token != nil && r.token.alive && r.generation == r.state.generation
 }
 
 // Network returns the causal universe shared by this replica.
-func (r *Rumors[T]) Network() Network { return r.state.network }
+func (r *Replica[T]) Network() Network { return r.state.network }
 
 // Clone creates another live handle. Close each independently cloned handle.
-func (r *Rumors[T]) Clone() (*Rumors[T], error) {
+func (r *Replica[T]) Clone() (*Replica[T], error) {
 	if r == nil || r.state == nil {
 		return nil, ErrClosed
 	}
@@ -267,14 +268,14 @@ func (r *Rumors[T]) Clone() (*Rumors[T], error) {
 		return nil, ErrClosed
 	}
 	r.generation.refs++
-	return &Rumors[T]{
+	return &Replica[T]{
 		state:      r.state,
 		token:      &handleToken{alive: true},
 		generation: r.generation,
 	}, nil
 }
 
-func (r *Rumors[T]) releaseLocked() {
+func (r *Replica[T]) releaseLocked() {
 	r.token.alive = false
 	r.generation.refs--
 	if r.generation.refs == 0 {
@@ -283,7 +284,7 @@ func (r *Rumors[T]) releaseLocked() {
 }
 
 // Close releases this handle. Repeated calls and closes through copies are safe.
-func (r *Rumors[T]) Close() error {
+func (r *Replica[T]) Close() error {
 	if r == nil || r.state == nil {
 		return nil
 	}
@@ -298,7 +299,7 @@ func (r *Rumors[T]) Close() error {
 	return nil
 }
 
-func (r *Rumors[T]) claimLocked() (*Peer[T], error) {
+func (r *Replica[T]) claimLocked() (*Peer[T], error) {
 	if r.generation.claimed {
 		return nil, ErrClaimed
 	}
@@ -308,7 +309,7 @@ func (r *Rumors[T]) claimLocked() (*Peer[T], error) {
 
 // TryIntoPeer consumes the handle only if no other live handle remains.
 // ErrBusy leaves this handle usable. Exactly one caller can recover the peer.
-func (r *Rumors[T]) TryIntoPeer() (*Peer[T], error) {
+func (r *Replica[T]) TryIntoPeer() (*Peer[T], error) {
 	if r == nil || r.state == nil {
 		return nil, ErrClosed
 	}
@@ -327,7 +328,7 @@ func (r *Rumors[T]) TryIntoPeer() (*Peer[T], error) {
 // IntoPeer consumes this handle and waits for all independently cloned handles
 // to close or enter IntoPeer. Cancellation abandons this caller's claim; the
 // consumed handle remains closed. Among waiting callers exactly one succeeds.
-func (r *Rumors[T]) IntoPeer(ctx context.Context) (*Peer[T], error) {
+func (r *Replica[T]) IntoPeer(ctx context.Context) (*Peer[T], error) {
 	if r == nil || r.state == nil {
 		return nil, ErrClosed
 	}
@@ -359,7 +360,7 @@ func (r *Rumors[T]) IntoPeer(ctx context.Context) (*Peer[T], error) {
 
 // Snapshot captures a consistent immutable view in constant time. It remains
 // readable after this handle closes and after the peer is reclaimed.
-func (r *Rumors[T]) Snapshot() Snapshot[T] {
+func (r *Replica[T]) Snapshot() Snapshot[T] {
 	return Snapshot[T]{
 		network: r.state.network,
 		tree:    r.state.current.Load().tree,
@@ -378,7 +379,7 @@ func (s *replica[T]) publishLocked(t tree.Tree[[]byte]) {
 }
 
 // Close abandons this exclusive peer and ends its observers. A consumed peer
-// cannot close the replica now owned by Rumors handles or another peer token.
+// cannot close the replica now owned by Replica handles or another peer token.
 func (p *Peer[T]) Close() error {
 	if p == nil || p.state == nil {
 		return nil

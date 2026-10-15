@@ -52,7 +52,7 @@ func TestBatchUpstreamPerKeyHistoryFixtures(t *testing.T) {
 	}
 }
 
-func runBatchFixture(t *testing.T, name string) *Rumors[[]byte] {
+func runBatchFixture(t *testing.T, name string) *Replica[[]byte] {
 	t.Helper()
 	replica := seededBytes(t)
 	fresh := before.Version{}.Tick(before.SeedParty())

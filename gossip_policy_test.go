@@ -24,7 +24,7 @@ func closedGossipPolicy(calls chan<- policyInvocation) GossipWhen[[]byte] {
 	}
 }
 
-func driveEndedPolicy(t *testing.T, peer *Rumors[[]byte]) {
+func driveEndedPolicy(t *testing.T, peer *Replica[[]byte]) {
 	t.Helper()
 	near, _ := managedPair(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -39,7 +39,7 @@ func driveEndedPolicy(t *testing.T, peer *Rumors[[]byte]) {
 
 func oneGossipPolicyExchange(
 	t *testing.T,
-	source, target *Rumors[[]byte],
+	source, target *Replica[[]byte],
 	options GossipOptions[[]byte],
 ) Gossiped {
 	t.Helper()
@@ -79,7 +79,7 @@ func TestGossipFactorySurvivesCloneBookmarkAndReunion(t *testing.T) {
 	if err := peer.AttachBookmark(t.Context(), new(bookmark.Memory)); err != nil {
 		t.Fatal(err)
 	}
-	live, err := peer.IntoRumors()
+	live, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestGossipFactorySurvivesCloneBookmarkAndReunion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := recovered.IntoRumors()
+	restored, err := recovered.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestBootstrapFactorySurvivesConfigurationAndAttachment(t *testing.T) {
 	if len(calls) != 0 {
 		t.Fatal("bootstrap invoked continuous initiation factory")
 	}
-	live, err := joined.Peer.IntoRumors()
+	live, err := joined.Peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestPerConnectionGossipFactoryOverridesInheritedPolicy(t *testing.T) {
 	if _, err := peer.WithGossipWhen(closedGossipPolicy(inherited)); err != nil {
 		t.Fatal(err)
 	}
-	live, err := peer.IntoRumors()
+	live, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestInheritedPassiveGossipPolicyStillServesRemoteAndExplicitCalls(t *testin
 	if _, err := peer.WithGossipWhen(when); err != nil {
 		t.Fatal(err)
 	}
-	live, err := peer.IntoRumors()
+	live, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestNilGossipFactoryRestoresDefault(t *testing.T) {
 	if _, err := peer.WithGossipWhen(nil); err != nil {
 		t.Fatal(err)
 	}
-	live, err := peer.IntoRumors()
+	live, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}

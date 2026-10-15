@@ -51,12 +51,12 @@ func (s *scenario) bootstrap() error {
 		return s.rust.pair("gossip", s.join)
 	}
 	var err error
-	s.rumors, err = seed()
+	s.replica, err = seed()
 	if err != nil {
 		return err
 	}
 	if os.Getenv("HEARSAY_INTEROP_EMPTY") != "1" {
-		if _, err := s.rumors.Send([]byte("go before bootstrap")); err != nil {
+		if _, err := s.replica.Send([]byte("go before bootstrap")); err != nil {
 			return err
 		}
 	}
@@ -70,7 +70,7 @@ func (s *scenario) sendRust(payload []byte) error {
 
 func (s *scenario) diverge() error {
 	for i := 0; i < 40; i++ {
-		version, err := s.rumors.Send([]byte(fmt.Sprintf("go concurrent %d", i)))
+		version, err := s.replica.Send([]byte(fmt.Sprintf("go concurrent %d", i)))
 		if err != nil {
 			return err
 		}
@@ -85,7 +85,7 @@ func (s *scenario) diverge() error {
 }
 
 func (s *scenario) largePayloads() error {
-	if _, err := s.rumors.Send(bytes.Repeat([]byte{0xa5}, 1<<20)); err != nil {
+	if _, err := s.replica.Send(bytes.Repeat([]byte{0xa5}, 1<<20)); err != nil {
 		return err
 	}
 	if err := s.sendRust(bytes.Repeat([]byte{0x5a}, 1<<20)); err != nil {
@@ -99,7 +99,7 @@ func (s *scenario) redact() error {
 	if err != nil {
 		return err
 	}
-	if err := s.rumors.Redact(victim); err != nil {
+	if err := s.replica.Redact(victim); err != nil {
 		return err
 	}
 	if _, err := s.rust.command(
@@ -140,7 +140,7 @@ func (s *scenario) transitive() error {
 		rust:     second,
 		endpoint: s.endpoint,
 		provider: "rust",
-		rumors:   s.rumors,
+		replica:  s.replica,
 	}
 	if err := relay.connect(); err != nil {
 		return err
@@ -170,7 +170,7 @@ func (s *scenario) transitive() error {
 	if err := relay.check(); err != nil {
 		return err
 	}
-	if s.rumors.Snapshot().Contains(victim) {
+	if s.replica.Snapshot().Contains(victim) {
 		return fmt.Errorf("deleted record survived relay")
 	}
 	return nil
@@ -227,7 +227,7 @@ func (s *scenario) repeatPayloads(round int, epoch uint8) error {
 	if round%32 != 0 && epoch < 254 && epoch > 2 {
 		return nil
 	}
-	if _, err := s.rumors.Send(
+	if _, err := s.replica.Send(
 		[]byte(fmt.Sprintf("go reuse round %d epoch %d", round, epoch)),
 	); err != nil {
 		return err
@@ -236,7 +236,7 @@ func (s *scenario) repeatPayloads(round int, epoch uint8) error {
 }
 
 func (s *scenario) retireGo(expect h.RetirementStatus) error {
-	peer, err := s.rumors.TryIntoPeer()
+	peer, err := s.replica.TryIntoPeer()
 	if err != nil {
 		return err
 	}
@@ -247,9 +247,9 @@ func (s *scenario) retireGo(expect h.RetirementStatus) error {
 	if result.Status != expect {
 		return fmt.Errorf("retirement status %v; want %v", result.Status, expect)
 	}
-	s.rumors = nil
+	s.replica = nil
 	if result.Peer != nil {
-		s.rumors, err = result.Peer.IntoRumors()
+		s.replica, err = result.Peer.IntoReplica()
 	}
 	return err
 }
@@ -267,7 +267,7 @@ func (s *scenario) retireAndRejoin() error {
 		if err := s.rust.retirement("retired", s.gossip); err != nil {
 			return err
 		}
-		if _, err := s.rumors.Send([]byte("after Rust retired")); err != nil {
+		if _, err := s.replica.Send([]byte("after Rust retired")); err != nil {
 			return err
 		}
 		return s.rust.pair("bootstrap", s.gossip)

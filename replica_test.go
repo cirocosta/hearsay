@@ -7,13 +7,13 @@ import (
 	"testing"
 )
 
-func seededBytes(t *testing.T) *Rumors[[]byte] {
+func seededBytes(t *testing.T) *Replica[[]byte] {
 	t.Helper()
 	p, err := Seed(BytesCodec())
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := p.IntoRumors()
+	r, err := p.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestCodecAdmissionRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, _ := p.IntoRumors()
+	r, _ := p.IntoReplica()
 	defer func() { _ = r.Close() }()
 	if err := r.SendAll([]string{"accepted", "reject"}); !errors.Is(err, ErrCodec) {
 		t.Fatal(err)
@@ -130,11 +130,11 @@ func TestPeerCopiesCannotDuplicateIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	copyPeer := *p
-	r, err := p.IntoRumors()
+	r, err := p.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := copyPeer.IntoRumors(); !errors.Is(err, ErrClosed) {
+	if _, err := copyPeer.IntoReplica(); !errors.Is(err, ErrClosed) {
 		t.Fatalf("copied peer consumed: %v", err)
 	}
 	clone, err := r.Clone()
@@ -154,7 +154,7 @@ func TestPeerCopiesCannotDuplicateIdentity(t *testing.T) {
 	if _, err := r.Send(nil); !errors.Is(err, ErrClosed) {
 		t.Fatalf("consumed handle send: %v", err)
 	}
-	live, err := recovered.IntoRumors()
+	live, err := recovered.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestConcurrentReunionOneWinner(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	results := make(chan error, 2)
-	for _, h := range []*Rumors[[]byte]{r, other} {
+	for _, h := range []*Replica[[]byte]{r, other} {
 		go func() { defer wg.Done(); _, err := h.IntoPeer(context.Background()); results <- err }()
 	}
 	wg.Wait()
@@ -227,7 +227,7 @@ func TestUnfaithfulCodecRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := peer.IntoRumors()
+	r, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestMalformedCodecRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := peer.IntoRumors()
+	r, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestIntoPeerCancellationConsumesHandle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live, err := peer.IntoRumors()
+	live, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}

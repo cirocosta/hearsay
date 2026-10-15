@@ -200,7 +200,7 @@ func networkActor(
 	party *before.Party,
 	t tree.Tree[[]byte],
 	budget uint64,
-) *Rumors[[]byte] {
+) *Replica[[]byte] {
 	b.Helper()
 	p := newPeer(Network{1}, party, t, BytesCodec())
 	settings := p.SynchronizationSettings()
@@ -208,7 +208,7 @@ func networkActor(
 	if _, err := p.WithSynchronizationSettings(settings); err != nil {
 		b.Fatal(err)
 	}
-	r, err := p.IntoRumors()
+	r, err := p.IntoReplica()
 	if err != nil {
 		b.Fatal(err)
 	}

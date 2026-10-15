@@ -248,7 +248,7 @@ type RetireResult[T any] struct {
 
 // GossipOnce runs one complete session. Established handles also serve joiners
 // and accept retiring peers. Each active session holds its own producer claim.
-func (r *Rumors[T]) GossipOnce(ctx context.Context, carrier *link.Managed) (Gossiped, error) {
+func (r *Replica[T]) GossipOnce(ctx context.Context, carrier *link.Managed) (Gossiped, error) {
 	hold, err := r.Clone()
 	if err != nil {
 		return Gossiped{}, err

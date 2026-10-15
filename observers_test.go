@@ -19,21 +19,21 @@ type messageObserver interface {
 
 type observerFactory struct {
 	name string
-	make func(*Rumors[[]byte], Version) messageObserver
+	make func(*Replica[[]byte], Version) messageObserver
 }
 
 var observerFactories = []observerFactory{
 	{
 		"unordered",
-		func(r *Rumors[[]byte], since Version) messageObserver { return r.UnorderedMessagesSince(since) },
+		func(r *Replica[[]byte], since Version) messageObserver { return r.UnorderedMessagesSince(since) },
 	},
 	{
 		"causal",
-		func(r *Rumors[[]byte], since Version) messageObserver { return r.CausalMessagesSince(since) },
+		func(r *Replica[[]byte], since Version) messageObserver { return r.CausalMessagesSince(since) },
 	},
 }
 
-func observerSend(t *testing.T, r *Rumors[[]byte], value string) Version {
+func observerSend(t *testing.T, r *Replica[[]byte], value string) Version {
 	t.Helper()
 	v, err := r.Send([]byte(value))
 	if err != nil {
@@ -154,7 +154,7 @@ func TestObserverOwnershipRoundTripAndFinalDrain(t *testing.T) {
 			if _, state := observer.TryNext(); state != Quiet {
 				t.Fatal("recovered peer did not keep observer alive:", state)
 			}
-			live, err := peer.IntoRumors()
+			live, err := peer.IntoReplica()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -329,7 +329,7 @@ func TestChangesCoalescingNoopsAndFinalDrain(t *testing.T) {
 	if changes.TryNext() != Quiet {
 		t.Fatal("ownership recovery ended Changes")
 	}
-	live, err := peer.IntoRumors()
+	live, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}

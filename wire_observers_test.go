@@ -74,7 +74,7 @@ func TestWireObserversCaptureCompleteControlAndData(t *testing.T) {
 	if err := peer.AttachObserver(recorderA); err != nil {
 		t.Fatal(err)
 	}
-	source, err := peer.IntoRumors()
+	source, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestWireObserversCaptureCompleteControlAndData(t *testing.T) {
 	if err := <-served; err != nil {
 		t.Fatal(err)
 	}
-	live, err := joined.Peer.IntoRumors()
+	live, err := joined.Peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestRejectedPreambleIsNotObservedAsReceivedItem(t *testing.T) {
 	if err := peer.AttachObserver(recorder); err != nil {
 		t.Fatal(err)
 	}
-	source, err := peer.IntoRumors()
+	source, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestContinuousWireObserverElapsedMatchesReturnedStatistics(t *testing.T) {
 	if err := peer.AttachObserver(recorder); err != nil {
 		t.Fatal(err)
 	}
-	live, err := peer.IntoRumors()
+	live, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}

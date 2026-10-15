@@ -92,7 +92,7 @@ func (o *diagnosticObserver) Stream(info observe.StreamInfo) observe.StreamObser
 }
 func (o *diagnosticObserver) Message([]byte) { o.once.Do(func() { close(o.ready) }) }
 
-func publicDiagnosticPeer(t *testing.T, observers ...observe.Observer) *h.Rumors[[]byte] {
+func publicDiagnosticPeer(t *testing.T, observers ...observe.Observer) *h.Replica[[]byte] {
 	t.Helper()
 	peer, err := h.Seed(h.BytesCodec())
 	if err != nil {
@@ -103,12 +103,12 @@ func publicDiagnosticPeer(t *testing.T, observers ...observe.Observer) *h.Rumors
 			t.Fatal(err)
 		}
 	}
-	rumors, err := peer.IntoRumors()
+	replica, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = rumors.Close() })
-	return rumors
+	t.Cleanup(func() { _ = replica.Close() })
+	return replica
 }
 
 func TestPublicProtocolMismatchOperands(t *testing.T) {

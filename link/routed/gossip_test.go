@@ -64,13 +64,13 @@ func integrationPair(
 	return a, b
 }
 
-func seededIntegration(t *testing.T) *hearsay.Rumors[[]byte] {
+func seededIntegration(t *testing.T) *hearsay.Replica[[]byte] {
 	t.Helper()
 	seed, err := hearsay.Seed(hearsay.BytesCodec())
 	if err != nil {
 		t.Fatal(err)
 	}
-	replica, err := seed.IntoRumors()
+	replica, err := seed.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func seededIntegration(t *testing.T) *hearsay.Rumors[[]byte] {
 func integrationGossip(
 	ctx context.Context,
 	t *testing.T,
-	a, b *hearsay.Rumors[[]byte],
+	a, b *hearsay.Replica[[]byte],
 	near, far *link.Managed,
 ) {
 	t.Helper()
@@ -126,7 +126,7 @@ func TestBootstrapAndRepeatedGossipOverRoutedStreams(t *testing.T) {
 			if joined.Peer == nil {
 				t.Fatal("bootstrap returned no peer")
 			}
-			replica, err := joined.Peer.IntoRumors()
+			replica, err := joined.Peer.IntoReplica()
 			if err != nil {
 				t.Fatal(err)
 			}

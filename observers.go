@@ -76,7 +76,7 @@ type Changes[T any] struct {
 }
 
 // Changes observes the current frontier immediately, then coalesced advances.
-func (r *Rumors[T]) Changes() *Changes[T] {
+func (r *Replica[T]) Changes() *Changes[T] {
 	return &Changes[T]{source: observationSource[T]{state: r.state}, first: true}
 }
 
@@ -132,12 +132,12 @@ type UnorderedMessages[T any] struct {
 }
 
 // UnorderedMessages observes all live content and subsequent additions.
-func (r *Rumors[T]) UnorderedMessages() *UnorderedMessages[T] {
+func (r *Replica[T]) UnorderedMessages() *UnorderedMessages[T] {
 	return r.UnorderedMessagesSince(Version{})
 }
 
 // UnorderedMessagesSince observes live content not covered by since.
-func (r *Rumors[T]) UnorderedMessagesSince(since Version) *UnorderedMessages[T] {
+func (r *Replica[T]) UnorderedMessagesSince(since Version) *UnorderedMessages[T] {
 	return &UnorderedMessages[T]{source: observationSource[T]{state: r.state}, checkpoint: since}
 }
 
@@ -213,12 +213,12 @@ type CausalMessages[T any] struct {
 }
 
 // CausalMessages observes all live content and additions in causal order.
-func (r *Rumors[T]) CausalMessages() *CausalMessages[T] {
+func (r *Replica[T]) CausalMessages() *CausalMessages[T] {
 	return r.CausalMessagesSince(Version{})
 }
 
 // CausalMessagesSince observes content not covered by since in causal order.
-func (r *Rumors[T]) CausalMessagesSince(since Version) *CausalMessages[T] {
+func (r *Replica[T]) CausalMessagesSince(since Version) *CausalMessages[T] {
 	return &CausalMessages[T]{
 		source:     observationSource[T]{state: r.state},
 		checkpoint: since,

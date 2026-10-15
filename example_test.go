@@ -22,10 +22,10 @@ func exampleCheck(err error) {
 	}
 }
 
-func ExampleRumors_GossipOnce() {
+func ExampleReplica_GossipOnce() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	alice := exampleValue(exampleValue(hearsay.Seed(hearsay.BytesCodec())).IntoRumors())
+	alice := exampleValue(exampleValue(hearsay.Seed(hearsay.BytesCodec())).IntoReplica())
 	defer func() { _ = alice.Close() }()
 	version := exampleValue(alice.Send([]byte("the meeting is at noon")))
 
@@ -39,7 +39,7 @@ func ExampleRumors_GossipOnce() {
 	serve()
 	joined := exampleValue(hearsay.Bootstrap(hearsay.BytesCodec()).Join(ctx, b))
 	exampleCheck(<-served)
-	bob := exampleValue(joined.Peer.IntoRumors())
+	bob := exampleValue(joined.Peer.IntoReplica())
 	defer func() { _ = bob.Close() }()
 	for message := range bob.Snapshot().All() {
 		exampleCheck(message.Err)

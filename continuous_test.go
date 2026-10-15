@@ -19,7 +19,7 @@ type continuousEvent struct {
 
 func startContinuous(
 	ctx context.Context,
-	r *Rumors[[]byte],
+	r *Replica[[]byte],
 	carrier *link.Managed,
 	options GossipOptions[[]byte],
 ) (<-chan continuousEvent, <-chan struct{}) {
@@ -58,11 +58,11 @@ func noContinuousEvent(t *testing.T, events <-chan continuousEvent) {
 	}
 }
 
-func continuousPeers(t *testing.T) (*Rumors[[]byte], *Rumors[[]byte]) {
+func continuousPeers(t *testing.T) (*Replica[[]byte], *Replica[[]byte]) {
 	t.Helper()
 	a := seededBytes(t)
 	peer := bootstrapBytes(t, a)
-	b, err := peer.IntoRumors()
+	b, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestContinuousBreakReleasesHandleAndKeepsLinkReusable(t *testing.T) {
 		if err != nil {
 			t.Fatal("driver retained writable handle after break:", err)
 		}
-		live, err := peer.IntoRumors()
+		live, err := peer.IntoReplica()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -350,7 +350,7 @@ func TestContinuousDeadlineObservation(t *testing.T) {
 		if err := peer.AttachObserver(observer); err != nil {
 			t.Fatal(err)
 		}
-		r, err := peer.IntoRumors()
+		r, err := peer.IntoReplica()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -488,7 +488,7 @@ func TestContinuousInheritsPeerDeadline(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r, err := peer.IntoRumors()
+		r, err := peer.IntoReplica()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -514,7 +514,7 @@ func TestContinuousOptionsOverridePeerDeadline(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		a, err = peer.IntoRumors()
+		a, err = peer.IntoReplica()
 		if err != nil {
 			t.Fatal(err)
 		}

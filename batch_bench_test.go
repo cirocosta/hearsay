@@ -104,11 +104,11 @@ func benchmarkAtomicAPI(b *testing.B, size, delta int, kind string) {
 	b.Helper()
 	fixture := makeAtomicBatchFixture(size, delta, kind)
 	const width = 16
-	peers := make([]*Rumors[[]byte], width)
+	peers := make([]*Replica[[]byte], width)
 	for i := range peers {
 		peer := newPeer(Network{1}, before.SeedParty(), fixture.original, BytesCodec())
 		var err error
-		peers[i], err = peer.IntoRumors()
+		peers[i], err = peer.IntoReplica()
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -152,7 +152,7 @@ func benchmarkAtomicAPI(b *testing.B, size, delta int, kind string) {
 }
 
 func runAtomicAPI(
-	replica *Rumors[[]byte],
+	replica *Replica[[]byte],
 	payloads [][]byte,
 	versions []Version,
 	actions []action,

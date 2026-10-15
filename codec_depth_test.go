@@ -33,7 +33,7 @@ func TestCodecBoundedAdmissionAndUnlimitedReadback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := peer.IntoRumors()
+	r, err := peer.IntoReplica()
 	if err != nil {
 		t.Fatal(err)
 	}
