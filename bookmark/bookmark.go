@@ -8,7 +8,8 @@ import (
 	"sync"
 )
 
-// DefaultSizeLimit bounds the encoded record to 16 MiB.
+// DefaultSizeLimit is the recommended 16 MiB encoded record retention limit.
+// File storage preserves opaque bytes without imposing this policy itself.
 const DefaultSizeLimit int64 = 16 * 1024 * 1024
 
 var (

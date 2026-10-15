@@ -20,9 +20,10 @@ type File struct {
 	serial chan struct{}
 }
 
-// NewFile stores records at path using DefaultSizeLimit.
+// NewFile stores opaque records at path without an application size limit.
+// Use NewFileWithLimit to apply an explicit bound to physical reads and writes.
 func NewFile(path string) *File {
-	f, _ := NewFileWithLimit(path, DefaultSizeLimit)
+	f, _ := NewFileWithLimit(path, int64(^uint(0)>>1)-1)
 	return f
 }
 

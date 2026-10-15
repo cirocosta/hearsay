@@ -109,6 +109,25 @@ func TestFileRestartAndBounds(t *testing.T) {
 	}
 }
 
+func TestFileDefaultPreservesRecordsAboveRetentionLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "record")
+	value := bytes.Repeat([]byte{0x5a}, int(DefaultSizeLimit)+1)
+	if err := NewFile(path).Store(t.Context(), value); err != nil {
+		t.Fatal(err)
+	}
+	got, err := NewFile(path).Load(t.Context())
+	if err != nil || !bytes.Equal(got, value) {
+		t.Fatalf("opaque record did not survive restart: %d bytes, %v", len(got), err)
+	}
+	bounded, err := NewFileWithLimit(path, DefaultSizeLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bounded.Load(t.Context()); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("explicit read limit: %v", err)
+	}
+}
+
 func TestFileRejectsNonRegular(t *testing.T) {
 	for _, kind := range []string{"directory", "symlink"} {
 		t.Run(kind, func(t *testing.T) {
