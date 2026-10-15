@@ -10,6 +10,7 @@ import (
 
 	"github.com/cirocosta/hearsay/internal/protocol"
 	"github.com/cirocosta/hearsay/link"
+	"github.com/cirocosta/hearsay/observe"
 )
 
 var (
@@ -36,19 +37,21 @@ type streamStats struct {
 }
 
 type streamWriter struct {
-	mu     sync.Mutex
-	writer io.WriteCloser
-	done   bool
-	buf    []byte
+	mu       sync.Mutex
+	writer   io.WriteCloser
+	done     bool
+	buf      []byte
+	observer observe.StreamObserver
 }
 
 type streamReader struct {
-	mu     sync.Mutex
-	ready  chan struct{}
-	reader io.ReadCloser
-	used   bool
-	done   bool
-	seen   bool
+	mu       sync.Mutex
+	ready    chan struct{}
+	reader   io.ReadCloser
+	used     bool
+	done     bool
+	seen     bool
+	observer observe.StreamObserver
 }
 
 // streamSet routes independent session data streams. Each logical stream has
@@ -62,6 +65,7 @@ type streamSet struct {
 	local         protocol.Role
 	remote        protocol.Role
 	limits        protocol.FrameLimits
+	observer      *observe.Session
 	outgoing      [link.StreamCount]streamWriter
 	incoming      [link.StreamCount]streamReader
 	stats         streamStats
@@ -85,6 +89,7 @@ func newStreamSet(
 	epoch uint8,
 	localRole protocol.Role,
 	limits protocol.FrameLimits,
+	observers ...*observe.Session,
 ) *streamSet {
 	runCtx, cancel := context.WithCancel(ctx)
 	s := &streamSet{
@@ -97,6 +102,9 @@ func newStreamSet(
 		limits:     limits,
 		fatal:      make(chan error, 1),
 		acceptDone: make(chan struct{}),
+	}
+	if len(observers) > 0 {
+		s.observer = observers[0]
 	}
 	for i := range s.incoming {
 		s.incoming[i].ready = make(chan struct{})
@@ -207,6 +215,9 @@ func (s *streamSet) send(index uint8, frame protocol.Frame) error {
 	if err = flushStream(slot.writer); err != nil {
 		return err
 	}
+	if slot.observer != nil {
+		slot.observer.Message(encoded)
+	}
 	s.stats.framesSent.Add(1)
 	return nil
 }
@@ -230,7 +241,11 @@ func (s *streamSet) openWriter(index uint8, slot *streamWriter) error {
 	s.mu.Unlock()
 	s.stats.streamsOpened.Add(1)
 	label, _ := (protocol.Label{Epoch: s.epoch, Stream: index}).AppendTo(nil)
-	return writeAll(writer, label, nil)
+	if err := writeAll(writer, label, nil); err != nil {
+		return err
+	}
+	slot.observer = s.observer.Data(observe.Role(s.local), index, observe.Sent)
+	return nil
 }
 
 func writeAll(writer io.Writer, data []byte, counter *atomic.Uint64) error {
@@ -275,6 +290,9 @@ func (s *streamSet) receive(index uint8) (protocol.Frame, error) {
 		return protocol.Frame{}, s.ctx.Err()
 	case <-slot.ready:
 	}
+	if !slot.used {
+		slot.observer = s.observer.Data(observe.Role(s.remote), index, observe.Received)
+	}
 	slot.used = true
 	return s.readFrame(index, slot.reader)
 }
@@ -293,8 +311,22 @@ func (r countedReader) Read(p []byte) (int, error) {
 }
 
 func (s *streamSet) readFrame(index uint8, reader io.Reader) (protocol.Frame, error) {
+	counted := countedReader{reader, &s.stats.bytesReceived}
+	observer := s.incoming[index].observer
+	if observer == nil {
+		return s.decodeFrame(index, counted)
+	}
+	capture := observe.NewCaptureReader(counted)
+	frame, err := s.decodeFrame(index, capture)
+	if err == nil {
+		observer.Message(capture.Bytes())
+	}
+	return frame, err
+}
+
+func (s *streamSet) decodeFrame(index uint8, reader io.Reader) (protocol.Frame, error) {
 	frame, err := protocol.ReadFrame(
-		countedReader{reader, &s.stats.bytesReceived},
+		reader,
 		s.remote,
 		s.limits,
 	)

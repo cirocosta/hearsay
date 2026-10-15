@@ -13,6 +13,7 @@ import (
 	"github.com/cirocosta/hearsay/internal/protocol"
 	"github.com/cirocosta/hearsay/internal/tree"
 	"github.com/cirocosta/hearsay/link"
+	"github.com/cirocosta/hearsay/observe"
 )
 
 // Session errors identify incoherent premises and invalid positional replies.
@@ -30,6 +31,7 @@ var (
 type Options struct {
 	MemoryBudget uint64
 	Admit        func([]byte) error
+	Observer     *observe.Session
 }
 
 // Stats counts data frames, excluding transport labels and control traffic.
@@ -104,6 +106,7 @@ func Run(
 	if negotiation.Initiator {
 		role = protocol.Initiator
 	}
+	options.Observer.Elected(observe.Role(role))
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	e := &engine{
@@ -123,6 +126,7 @@ func Run(
 		epoch,
 		role,
 		protocol.FrameLimits{TargetMessageSize: negotiation.TargetMessageSize},
+		options.Observer,
 	)
 	e.initQueues()
 	return e.run()
