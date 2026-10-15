@@ -142,14 +142,16 @@ type published struct {
 }
 
 type replica[T any] struct {
-	mu         sync.Mutex
-	network    Network
-	party      *before.Party
-	codec      Codec[T]
-	current    atomic.Pointer[published]
-	generation *generation
-	done       chan struct{}
-	ended      bool
+	mu           sync.Mutex
+	network      Network
+	party        *before.Party
+	codec        Codec[T]
+	current      atomic.Pointer[published]
+	generation   *generation
+	settings     SynchronizationSettings
+	reservations uint64
+	done         chan struct{}
+	ended        bool
 }
 
 type generation struct {
@@ -206,7 +208,15 @@ func newPeer[T any](
 	t tree.Tree[[]byte],
 	codec Codec[T],
 ) *Peer[T] {
-	s := &replica[T]{network: network, party: party, codec: codec, done: make(chan struct{})}
+	settings := defaultSettings(codec.PayloadDepthLimit)
+	codec.PayloadDepthLimit = settings.PayloadDepthLimit
+	s := &replica[T]{
+		network:  network,
+		party:    party,
+		codec:    codec,
+		settings: settings,
+		done:     make(chan struct{}),
+	}
 	s.current.Store(&published{tree: t, changed: make(chan struct{})})
 	return &Peer[T]{state: s, token: &peerToken{alive: true}}
 }

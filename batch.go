@@ -15,6 +15,7 @@ type Batch[T any] struct {
 	codec   Codec[T]
 	actions []action
 	closed  bool
+	limit   uint64
 }
 
 // Send admits and queues a payload without publishing it.
@@ -22,7 +23,7 @@ func (b *Batch[T]) Send(payload T) error {
 	if b.closed {
 		return ErrClosed
 	}
-	p, err := b.codec.encode(payload)
+	p, err := b.codec.encodeBounded(payload, b.limit)
 	if err != nil {
 		return err
 	}
@@ -66,11 +67,13 @@ func (r *Rumors[T]) Send(payload T) (Version, error) {
 	}
 	r.state.mu.Lock()
 	alive := r.aliveLocked()
+	codec := r.state.codec
+	limit := r.state.settings.PayloadDepthLimit
 	r.state.mu.Unlock()
 	if !alive {
 		return Version{}, ErrClosed
 	}
-	p, err := r.state.codec.encode(payload)
+	p, err := codec.encodeBounded(payload, limit)
 	if err != nil {
 		return Version{}, err
 	}
@@ -104,11 +107,13 @@ func (r *Rumors[T]) Batch(prepare func(*Batch[T]) error) error {
 	s := r.state
 	s.mu.Lock()
 	alive := r.aliveLocked()
+	codec := s.codec
+	limit := s.settings.PayloadDepthLimit
 	s.mu.Unlock()
 	if !alive {
 		return ErrClosed
 	}
-	b := &Batch[T]{codec: s.codec}
+	b := &Batch[T]{codec: codec, limit: limit}
 	defer func() { b.closed = true }()
 	if err := prepare(b); err != nil {
 		return err
