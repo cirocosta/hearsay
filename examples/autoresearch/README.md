@@ -10,6 +10,8 @@ same small agent loop runs for every member. Each has its own bootstrapped
 `Replica[note]`, model conversation, and research directory. Memory links form
 a ring; messages and files reach nonadjacent agents through gossip.
 
+See [the collaboration diagrams](collaboration.md) for artifact review and stopping.
+
 ## Run
 
 From the repository root, with Go 1.27.1 and an existing Codex CLI login:
