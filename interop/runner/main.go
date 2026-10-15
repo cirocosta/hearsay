@@ -6,9 +6,15 @@ import (
 	"os"
 	"runtime/pprof"
 	"time"
+
+	h "github.com/cirocosta/hearsay"
 )
 
 func main() {
+	if _, err := settingsFromEnv(h.SynchronizationSettings{}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	if os.Getenv("HEARSAY_INTEROP_DEBUG") == "1" {
 		time.AfterFunc(5*time.Second, dumpStacks)
 	}

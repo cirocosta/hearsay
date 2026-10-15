@@ -53,6 +53,7 @@ Environment variables apply to `./interop/run.sh`:
 | Variable | Effect |
 | --- | --- |
 | `HEARSAY_INTEROP_MINIMAL=1` | Go memory budget 1, target message size 0 |
+| `HEARSAY_INTEROP_MEMORY_BUDGET=16777216` | Explicit Go memory budget in decimal bytes (16 MiB here); overrides the minimal flag's budget, preserving its target setting |
 | `RUST_INTEROP_MINIMAL=1` | Rust memory budget 1, target message size 0 |
 | `HEARSAY_INTEROP_EMPTY=1` | Start with an empty bootstrap provider |
 | `HEARSAY_INTEROP_RACE=1` | Run the Go participant under the race detector |
@@ -69,6 +70,7 @@ RUST_INTEROP_MINIMAL=1 ./interop/run.sh
 HEARSAY_INTEROP_MINIMAL=1 RUST_INTEROP_MINIMAL=1 ./interop/run.sh
 HEARSAY_INTEROP_EMPTY=1 ./interop/run.sh
 HEARSAY_INTEROP_MINIMAL=1 RUST_INTEROP_MINIMAL=1 HEARSAY_INTEROP_RACE=1 ./interop/run.sh
+HEARSAY_INTEROP_MEMORY_BUDGET=16777216 ./interop/run.sh
 ```
 
 The debug dump defaults to `.agi.local/interop-artifacts/go-stack.txt`.

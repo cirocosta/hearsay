@@ -196,10 +196,11 @@ func (s *scenario) repeat() error {
 		)
 	}
 	fmt.Printf(
-		"%s-provider READY reuse: %d outgoing data streams, %d fresh dials\n",
+		"%s-provider READY reuse: %d outgoing data streams, %d fresh dials, maximum queue window %d\n",
 		s.provider,
 		opened,
 		dials,
+		s.window,
 	)
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -29,6 +30,7 @@ type scenario struct {
 	victim   h.Version
 	dials    *atomic.Uint64
 	opened   uint64
+	window   uint64
 }
 
 func newScenario(provider string) (*scenario, error) {
@@ -123,19 +125,13 @@ func (s *scenario) connect() error {
 	return nil
 }
 
-func bootstrap() *h.BootstrapConfig[[]byte] {
+func bootstrap() (*h.BootstrapConfig[[]byte], error) {
 	b := h.Bootstrap(h.BytesCodec())
-	if os.Getenv("HEARSAY_INTEROP_MINIMAL") != "1" {
-		return b
-	}
-	settings := b.SynchronizationSettings()
-	settings.SyncMemoryBudget = 1
-	settings.TargetMessageSize = 0
-	configured, err := b.WithSynchronizationSettings(settings)
+	settings, err := settingsFromEnv(b.SynchronizationSettings())
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return configured
+	return b.WithSynchronizationSettings(settings)
 }
 
 func seed() (*h.Rumors[[]byte], error) {
@@ -143,20 +139,41 @@ func seed() (*h.Rumors[[]byte], error) {
 	if err != nil {
 		return nil, err
 	}
-	if os.Getenv("HEARSAY_INTEROP_MINIMAL") == "1" {
-		settings := p.SynchronizationSettings()
-		settings.SyncMemoryBudget = 1
-		settings.TargetMessageSize = 0
-		p, err = p.WithSynchronizationSettings(settings)
-		if err != nil {
-			return nil, err
-		}
+	settings, err := settingsFromEnv(p.SynchronizationSettings())
+	if err != nil {
+		return nil, err
+	}
+	p, err = p.WithSynchronizationSettings(settings)
+	if err != nil {
+		return nil, err
 	}
 	return p.IntoRumors()
 }
 
+func settingsFromEnv(settings h.SynchronizationSettings) (h.SynchronizationSettings, error) {
+	if os.Getenv("HEARSAY_INTEROP_MINIMAL") == "1" {
+		settings.SyncMemoryBudget = 1
+		settings.TargetMessageSize = 0
+	}
+	if raw, provided := os.LookupEnv("HEARSAY_INTEROP_MEMORY_BUDGET"); provided {
+		budget, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return settings, fmt.Errorf(
+				"HEARSAY_INTEROP_MEMORY_BUDGET must be a decimal uint64: %w",
+				err,
+			)
+		}
+		settings.SyncMemoryBudget = budget
+	}
+	return settings, nil
+}
+
 func (s *scenario) join() error {
-	joined, err := bootstrap().Join(s.ctx, s.carrier)
+	builder, err := bootstrap()
+	if err != nil {
+		return err
+	}
+	joined, err := builder.Join(s.ctx, s.carrier)
 	if err != nil {
 		return err
 	}
@@ -170,6 +187,7 @@ func (s *scenario) join() error {
 func (s *scenario) gossip() error {
 	result, err := s.rumors.GossipOnce(s.ctx, s.carrier)
 	s.opened += result.Stats.StreamsOpened
+	s.window = max(s.window, result.Stats.WindowGranted)
 	return err
 }
 func (s *scenario) sync() error     { return s.rust.pair("gossip", s.gossip) }
