@@ -43,8 +43,8 @@ type Stats struct {
 	FramesSent, FramesReceived                 uint64
 	MessagesSent, MessagesGained, MessagesShed uint64
 	DisputedScopes, StreamsOpened              uint64
-	// WindowGranted is the largest configured comparison capacity. Equal
-	// frontiers skip window derivation and report zero.
+	// WindowGranted is the largest configured scope-count ceiling. Byte credit
+	// may apply earlier. Equal frontiers skip window derivation and report zero.
 	WindowGranted uint64
 	// WindowStalls counts pushes that observed a full comparison queue on
 	// arrival. It measures scheduling-dependent pressure, not wait duration.
@@ -164,18 +164,20 @@ func validatePremise(t tree.Tree[[]byte], g protocol.Greeting) error {
 }
 
 func (e *engine) initQueues() {
-	// each queued scope can retain a complete fan of node handles. Price the
-	// complete fan at every depth; small budgets still keep the liveness floor.
-	const scopePrice uint64 = 256*128 + 256
-	slots := e.options.MemoryBudget / (17 * scopePrice)
-	slots = max(1, min(slots, 4096))
-	e.windowGranted = slots
+	population := e.remote.SetLen
+	if e.local.SetLen == 0 {
+		// an empty opening is elected initiator. Its root query has no
+		// held children, so no positional reply can trigger deeper descent.
+		population = 0
+	}
 	first := 1
 	if e.role == protocol.Responder {
 		first = 2
 	}
 	for depth := first; depth < 34; depth += 2 {
-		e.queues[depth] = newPendingHandle(int(slots))
+		count, share := comparisonWindow(e.options.MemoryBudget, population, depth)
+		e.windowGranted = max(e.windowGranted, uint64(count))
+		e.queues[depth] = newPendingHandle(count, share)
 	}
 }
 

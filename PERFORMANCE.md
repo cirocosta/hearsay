@@ -147,3 +147,80 @@ oracle. Build `go test -c ./before` and `go test -c ./internal/tree`; compare
 `BenchmarkTickSeed`, `BenchmarkTickTopology`, `BenchmarkInsert`, and the
 `BenchmarkJoin/one-insert` and `one-redaction` guards. Source archives, binary
 hashes, raw trials, and benchstat output live under `.agi.local/perf/clocks/`.
+
+## Byte-credit comparison windows
+
+Comparison queues now charge their allocated slot capacity and detached child
+fans against one seventeenth of `SyncMemoryBudget`. Immutable opening nodes,
+clocks, and payloads remain shared. A depth's count ceiling also reflects the
+number of possible occupied prefixes. An empty queue always admits one item for
+progress. Growth and shrink use geometric steps to avoid repeated full-ring
+copies. This replaces conservative full-fan pricing and the fixed 4,096 ceiling.
+
+The calibrated test transport models shared directional bandwidth, absolute
+packet delivery times, independent stream credit, and joined delivery workers.
+These are simulated network results. Fixed matching binaries used the same
+100,000 shared messages, 10,000 new messages per side, and 1-KiB payloads. Each
+iteration includes negotiation, reconciliation, confirmed completion, and link
+shutdown; fixture construction and the independent Join oracle are outside
+timing. CPU affinity and runtime settings match the experiments above.
+
+One screen sample and two reversed-order confirmation samples per variant gave
+these medians. Both confirmation pairs reproduced the primary network gains:
+
+| Link and budget        | Original s/op | Retained s/op | Time change | Allocation change |
+| ---------------------- | ------------: | ------------: | ----------: | ----------------: |
+| 100 ms, 1 Gbps, 16 MiB |        28.688 |         2.048 |     -92.86% |            +2.68% |
+| 1 ms, 100 Gbps, 1 MiB  |         8.029 |         1.711 |     -78.70% |            +0.15% |
+| CPU, zero budget       |         1.681 |         1.686 |      +0.29% |             0.00% |
+| CPU, default 512 MiB   |         1.708 |         1.725 |      +1.03% |            +4.18% |
+
+Every main sample sends exactly 23,768,676 data bytes. The 16-MiB scope-count
+ceiling changes from 29 to 12,336; the 1-MiB ceiling changes from 1 to 771.
+`WindowGranted` reports that ceiling, not occupancy; byte credit can stall sooner.
+The zero-budget path retains native one-slot channels and identical allocation.
+Default CPU allocation increases by 14.9 MB/op as more work overlaps.
+
+Seven additional screen guards cover default-budget WAN/LAN, small floor
+fixtures, sparse differences, disjoint sets, redactions, and 16-KiB payloads.
+All preserve wire bytes and showed flat or improved latency in one sample each;
+these are guards, not confirmed speedup claims. Redactions have the largest
+allocation increase: 9.37%, or 16.4 MB/op. Transport peaks also rise with overlap:
+the disjoint case uses 9.0 MB versus 1.36 MB; the bulk case uses 13.7 MB versus
+11.1 MB. Transport storage is a separate term.
+
+`SyncMemoryBudget` targets comparison metadata, not total resident memory.
+Nonempty queues charge retained slot high-water plus live fan capacity. An empty
+queue has a one-item progress exception. During replacement, old and new arrays
+can coexist; reachable queue storage has a conservative two-share plus one-item
+envelope. Allocator rounding, GC headroom, shared opening trees, complete-reply
+actions, encoded runs, result custody, observers, and transport are separate.
+
+An artificial default-budget saturation test at 100,000 messages holds about
+220.8 MB of queue heap, including 125.2 MB of slots and 84.0 MB of fans; drained
+queues retain 125.3 MB of charged high-water slots. The old count limit held
+about 2.29 MB in that diagnostic. The new window deliberately uses more of the
+configured budget. This test fills queues to their individual barriers; it does
+not predict ordinary session occupancy.
+
+A separate full-session diagnostic forces GC during sampling, which changes
+scheduling. It uses 32-byte payloads on a 2-ms/1-Gbps model, unlike the timing
+fixtures above. At 110,000 opening messages and a 16-MiB budget it observes 17.35 MB
+incremental live heap, including 11.39 MB of final result custody. The sampled
+excess above both endpoint baselines is 5.96 MB; after result release the delta
+is about 4.7 KB. These are sampled lower bounds on transients, not natural peak
+measurements or a hard memory guarantee. Enable the opt-in memory tests
+with `HEARSAY_WINDOW_MEMORY=1`.
+
+The first credit candidate repeatedly trimmed growth to one affordable extra
+slot. Its profile attributed 819 MB to resizing and total allocation reached
+1.21-1.26 GB/op. A half-share heuristic did not repair it. Both trials were
+rejected. Final geometric resizing passed an independent 307,200-operation
+FIFO/credit/reference oracle, repeated races, and real Rust sessions.
+
+Reproduce with `go test -c .` and `BenchmarkSessionNetwork` using fixed binaries
+and the settings above. Compare only the engine/queue variants with identical
+fixtures. The regular matrix uses smaller long-RTT floor fixtures to stay within
+its session deadline. Raw samples, binary hashes, source overlays, memory logs,
+and the full eleven-case comparison remain in `.agi.local/perf/`, with the
+analysis in `WINDOW_RESULTS.md`.

@@ -83,15 +83,18 @@ func TestEqualAndBootstrapWindowGrants(t *testing.T) {
 
 func TestWindowGrantedReportsCapacity(t *testing.T) {
 	clock := before.Seed()
-	base := tree.Tree[[]byte]{}.Insert(clock.Tick(), []byte{0xf6})
+	var base tree.Tree[[]byte]
+	for range 8 {
+		base = base.Insert(clock.Tick(), []byte{0xf6})
+	}
 	remote := base.Insert(clock.Tick(), []byte{0xf6})
 	left, right := link.MemoryWithCapacity(1)
 	defer func() { _ = left.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	// use the unchanged current pricing formula to grant seven slots even
-	// though this sparse difference cannot occupy seven in-flight scopes.
-	const budget = 7 * 17 * (256*128 + 256)
+	// configured capacity is the affordable inline-slot count, bounded by
+	// peer prefix population. Actual fans may encounter byte pressure sooner.
+	const budget = 7 * comparisonQueues * pendingSlotBytes
 	type outcome struct {
 		result Result
 		err    error

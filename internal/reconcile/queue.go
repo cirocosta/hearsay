@@ -17,11 +17,11 @@ type pendingHandle struct {
 	lazy   *pendingQueue
 }
 
-func newPendingHandle(limit int) pendingHandle {
+func newPendingHandle(limit int, credit ...uint64) pendingHandle {
 	if limit <= 1 {
 		return pendingHandle{direct: make(chan pending, 1)}
 	}
-	return pendingHandle{lazy: newPendingQueue(limit)}
+	return pendingHandle{lazy: newPendingQueue(limit, credit...)}
 }
 
 func (q *pendingHandle) initialized() bool { return q.direct != nil || q.lazy != nil }
@@ -69,23 +69,33 @@ func (q *pendingHandle) close() {
 	close(q.direct)
 }
 
-// pendingQueue is a bounded single-producer, single-consumer queue. Storage
-// grows with actual occupancy, while limit retains the session's fixed window.
+// pendingQueue is a bounded single-producer, single-consumer queue. With byte
+// credit, it charges allocated slot capacity plus detached queued fan capacity.
+// A single item can exceed the share only when empty. Slot high-water remains
+// charged after pop; admission can replace an excessive ring with a smaller one.
+// During replacement old+new arrays cost at most two shares plus
+// that one fan. This is a reachable-array envelope, excluding allocator rounding,
+// GC headroom, shared opening nodes, and separately bounded reply/run custody.
 // Readiness tokens coalesce and allocate no memory on individual operations.
 type pendingQueue struct {
-	mu                 sync.Mutex
-	buffer             []pending
-	head, size, limit  int
-	closed             bool
-	readable, writable chan struct{}
+	mu                  sync.Mutex
+	buffer              []pending
+	head, size, limit   int
+	closed              bool
+	readable, writable  chan struct{}
+	byteLimit, fanBytes uint64
 }
 
-func newPendingQueue(limit int) *pendingQueue {
-	return &pendingQueue{
+func newPendingQueue(limit int, credit ...uint64) *pendingQueue {
+	q := &pendingQueue{
 		limit:    max(1, limit),
 		readable: make(chan struct{}, 1),
 		writable: make(chan struct{}, 1),
 	}
+	if len(credit) > 0 {
+		q.byteLimit = credit[0]
+	}
+	return q
 }
 
 func queueNotify(ready chan struct{}) {
@@ -127,32 +137,71 @@ func (q *pendingQueue) tryPush(item pending, stalls *atomic.Uint64) (bool, error
 		q.mu.Unlock()
 		return false, errQueueClosed
 	}
-	if q.size == q.limit {
+	capacity, admitted := q.admissionCapacity(item)
+	if q.size == q.limit || !admitted {
 		if stalls != nil {
 			stalls.Add(1)
 		}
 		q.mu.Unlock()
 		return false, nil
 	}
-	q.insert(item)
+	q.insert(item, capacity)
 	q.mu.Unlock()
 	queueNotify(q.readable)
 	return true, nil
 }
 
-func (q *pendingQueue) insert(item pending) {
-	if q.size == len(q.buffer) {
-		q.grow()
+func (q *pendingQueue) insert(item pending, capacity int) {
+	if capacity != len(q.buffer) {
+		q.grow(capacity)
 	}
 	q.buffer[(q.head+q.size)%len(q.buffer)] = item
 	q.size++
+	q.fanBytes += pendingFanBytes(item)
 }
 
-func (q *pendingQueue) grow() {
+func (q *pendingQueue) growthCapacity() int {
 	capacity := q.limit
 	if len(q.buffer) <= q.limit/2 {
 		capacity = max(1, 2*len(q.buffer))
 	}
+	return capacity
+}
+
+// admissionCapacity charges the ring's retained high-water capacity, even after
+// pop. The one-item exception preserves progress when a fan exceeds its share.
+// During resize both arrays remain reachable, adding at most one extra share.
+func (q *pendingQueue) admissionCapacity(item pending) (int, bool) {
+	capacity := len(q.buffer)
+	if q.size == capacity {
+		capacity = q.growthCapacity()
+	}
+	if q.byteLimit == 0 || q.size == 0 {
+		return capacity, true
+	}
+	fan := pendingFanBytes(item)
+	if fan > q.byteLimit || q.fanBytes > q.byteLimit-fan {
+		return 0, false
+	}
+	slots := (q.byteLimit - q.fanBytes - fan) / pendingSlotBytes
+	if uint64(len(q.buffer)) > slots {
+		capacity = len(q.buffer) / 2
+		if capacity <= q.size {
+			return 0, false
+		}
+		// a cheap wave can fill the share with inline slots. Recover fan
+		// credit only with a geometric shrink that can amortize its copy.
+		capacity = min(capacity, int(slots))
+	}
+	if uint64(capacity) > slots {
+		// trimming growth to one affordable extra slot would repeatedly
+		// copy a nearly full ring. Wait for a pop and reuse existing slots.
+		return 0, false
+	}
+	return capacity, capacity > q.size
+}
+
+func (q *pendingQueue) grow(capacity int) {
 	buffer := make([]pending, capacity)
 	for i := 0; i < q.size; i++ {
 		buffer[i] = q.buffer[(q.head+i)%len(q.buffer)]
@@ -191,6 +240,7 @@ func (q *pendingQueue) remove() pending {
 	q.buffer[q.head] = pending{}
 	q.head = (q.head + 1) % len(q.buffer)
 	q.size--
+	q.fanBytes -= pendingFanBytes(item)
 	return item
 }
 

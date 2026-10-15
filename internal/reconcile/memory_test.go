@@ -40,6 +40,8 @@ func measureWindowQueueMemory(t *testing.T, snapshot tree.Tree[[]byte], budget u
 		ctx:     context.Background(),
 		options: Options{MemoryBudget: budget},
 		role:    protocol.Initiator,
+		local:   greeting(snapshot, 0),
+		remote:  greeting(snapshot, 0),
 	}
 	e.initQueues()
 	var items, fanBytes, ringBytes uint64
@@ -47,7 +49,6 @@ func measureWindowQueueMemory(t *testing.T, snapshot tree.Tree[[]byte], budget u
 		q := &e.queues[depth+1]
 		var previous tree.Path
 		seen := false
-		used := uint64(0)
 		for version := range snapshot.All() {
 			path := tree.Address(version)
 			if seen && sameMemoryPrefix(path, previous, depth) {
@@ -58,14 +59,17 @@ func measureWindowQueueMemory(t *testing.T, snapshot tree.Tree[[]byte], budget u
 				t.Fatal(err)
 			}
 			fan := scope.Children()
-			if err := q.push(context.Background(), pending{scope: scope, fan: fan}); err != nil {
+			accepted, err := memoryTryPush(q, pending{scope: scope, fan: fan})
+			if err != nil {
 				t.Fatal(err)
+			}
+			if !accepted {
+				break
 			}
 			fanBytes += uint64(cap(fan)) * uint64(unsafe.Sizeof(tree.Child[[]byte]{}))
 			items++
 			previous, seen = path, true
-			used++
-			if used == e.windowGranted {
+			if depth == 0 {
 				break
 			}
 		}
@@ -119,4 +123,16 @@ func sameMemoryPrefix(a, b tree.Path, depth int) bool {
 		}
 	}
 	return true
+}
+
+func memoryTryPush(q *pendingHandle, item pending) (bool, error) {
+	if q.lazy != nil {
+		return q.lazy.tryPush(item, nil)
+	}
+	select {
+	case q.direct <- item:
+		return true, nil
+	default:
+		return false, nil
+	}
 }

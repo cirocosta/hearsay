@@ -127,7 +127,8 @@ type Stats struct {
 	FramesSent, FramesReceived                 uint64
 	MessagesSent, MessagesGained, MessagesShed uint64
 	DisputedScopes, StreamsOpened              uint64
-	// WindowGranted reports configured capacity, not observed occupancy.
+	// WindowGranted reports the configured scope-count ceiling. Byte credit
+	// may apply earlier; this is not observed occupancy.
 	WindowGranted uint64
 	// WindowStalls is scheduling-dependent full-window pressure on arrival.
 	WindowStalls uint64

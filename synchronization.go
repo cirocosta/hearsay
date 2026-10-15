@@ -10,7 +10,14 @@ const DefaultSyncMemoryBudget uint64 = 512 << 20
 // minimum pipeline. PayloadDepthLimit counts typed decoder recursion and must
 // match at both ends. Zero admits values that require no recursive descent.
 type SynchronizationSettings struct {
-	SyncMemoryBudget  uint64
+	// SyncMemoryBudget targets pending comparison metadata across 17 queues.
+	// Queues charge allocated slots and detached child fans. Each queue permits
+	// one item for progress even if it exceeds its share. Resize can temporarily
+	// retain old and new slot arrays. Opening snapshots, reply/run buffers,
+	// results, observers, and transport storage have separate ownership; this
+	// setting does not cap the session's total resident memory.
+	SyncMemoryBudget uint64
+
 	TargetMessageSize uint64
 	PayloadDepthLimit uint64
 }
