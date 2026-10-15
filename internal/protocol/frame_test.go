@@ -14,7 +14,6 @@ import (
 func testRecordLimits() RecordLimits {
 	return RecordLimits{
 		MaxVersionBytes: 4096,
-		Payload:         cbor.Limits{MaxDepth: 64, MaxBytes: 1 << 20, MaxItems: 10000},
 	}
 }
 
@@ -270,7 +269,7 @@ func TestMalformedFramesAndRuns(t *testing.T) {
 	if _, err := ParseRun(bad); err == nil {
 		t.Fatal("accepted wrong record tag")
 	}
-	for _, payload := range [][]byte{{}, {0xf6, 0xf6}, {0x81}, {0x61, 0xff}} {
+	for _, payload := range [][]byte{{}, {0xf6, 0xf6}, {0x81}} {
 		raw := append([]byte{0xd9, 0xd2, 0x56, 0x41, 0xe0}, payload...)
 		envelope := cbor.AppendHead(nil, cbor.MajorTag, 63)
 		envelope = appendBytes(envelope, cbor.MajorBytes, raw)
@@ -290,5 +289,38 @@ func TestMalformedFramesAndRuns(t *testing.T) {
 	}
 	if r.Len() != 8 {
 		t.Fatalf("read beyond run: %d remain", r.Len())
+	}
+}
+
+func TestRecordsLeavePayloadRecursionToTypedCodec(t *testing.T) {
+	clock := before.Seed()
+	payload := append(bytes.Repeat([]byte{0xc0}, 100_000), 0)
+	limits := RecordLimits{MaxVersionBytes: 4096}
+	builder := NewRunBuilder(1<<20, limits)
+	record := Record{Version: clock.Tick(), Payload: payload}
+	if ok, err := builder.Add(record); err != nil || !ok {
+		t.Fatalf("builder imposed structural payload policy: %v", err)
+	}
+	decoded, ok, err := builder.Take().Records(limits).Next()
+	if err != nil || !ok || !bytes.Equal(decoded.Payload, payload) {
+		t.Fatalf("record imposed structural payload policy: %v", err)
+	}
+}
+
+func TestRecordsLeavePayloadSemanticsToTypedCodec(t *testing.T) {
+	clock := before.Seed()
+	limits := testRecordLimits()
+	// A typed decoder may accept the noncanonical false spelling. UTF-8
+	// validity belongs to that same decoder, rather than record framing.
+	for _, payload := range [][]byte{{0xf8, 20}, {0x61, 0xff}} {
+		builder := NewRunBuilder(4096, limits)
+		record := Record{Version: clock.Tick(), Payload: payload}
+		if ok, err := builder.Add(record); err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+		got, ok, err := builder.Take().Records(limits).Next()
+		if err != nil || !ok || !bytes.Equal(got.Payload, record.Payload) {
+			t.Fatal(got, ok, err)
+		}
 	}
 }

@@ -174,12 +174,11 @@ type Record struct {
 	Payload []byte
 }
 
-// RecordLimits bounds version decoding and general application CBOR scanning.
-// MaxVersionBytes zero admits no version bytes. Payload zero fields use the
-// scanner defaults; configure them to match the negotiated payload policy.
+// RecordLimits bounds version decoding. MaxVersionBytes zero admits no version
+// bytes. Payload decoding and its typed recursion budget belong to the
+// application's codec, after record framing has been validated.
 type RecordLimits struct {
 	MaxVersionBytes uint64
-	Payload         cbor.Limits
 }
 
 // Records creates an iterator that decodes each version and payload once.
@@ -230,7 +229,7 @@ func decodeRecord(body []byte, limits RecordLimits) (Record, error) {
 	if err := record.Version.UnmarshalBinary(v); err != nil {
 		return record, invalid("record version", err)
 	}
-	if err := cbor.ValidateItem(p.data, limits.Payload); err != nil {
+	if err := cbor.ValidateWellFormed(p.data); err != nil {
 		return record, invalid("record payload", err)
 	}
 	record.Payload = p.data
@@ -492,7 +491,7 @@ func (b *RunBuilder) Add(record Record) (bool, error) {
 	if uint64(len(v)) > b.limits.MaxVersionBytes {
 		return false, ErrLimit
 	}
-	if err := cbor.ValidateItem(record.Payload, b.limits.Payload); err != nil {
+	if err := cbor.ValidateWellFormed(record.Payload); err != nil {
 		return false, err
 	}
 	body := uint64(
