@@ -135,3 +135,20 @@ func TestBatchCancelledFreshKeyDoesNotWakeChanges(t *testing.T) {
 		t.Fatal("cancelled fresh key published content or history")
 	}
 }
+
+func TestBatchDispatchUsesEffectiveKeys(t *testing.T) {
+	for _, kind := range []string{"send", "redact", "mixed"} {
+		for _, size := range []int{0, 1000} {
+			if size == 0 && kind != "send" {
+				continue
+			}
+			for _, delta := range []int{2, 3, 4, 7} {
+				fixture := makeAtomicBatchFixture(size, delta, kind)
+				got := applyBatch(fixture.original, fixture.party, fixture.actions)
+				if got.Hash() != fixture.want.Hash() || !got.Latest().Equal(fixture.want.Latest()) {
+					t.Fatal("batch dispatch changed distinct-key semantics")
+				}
+			}
+		}
+	}
+}

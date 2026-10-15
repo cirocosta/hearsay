@@ -156,15 +156,50 @@ func applyBatch(
 		}
 		return original.Forget(actions[0].version, stamp)
 	}
-	candidate := original
-	for _, effect := range batchEffects(original, party, actions) {
-		if effect.insert {
-			candidate = candidate.Insert(effect.version, effect.payload)
-		} else if effect.existed {
-			candidate = candidate.Forget(effect.version, effect.stamp)
+	return applyEffects(original, batchEffects(original, party, actions))
+}
+
+func applyEffects(original tree.Tree[[]byte], effects []batchEffect) tree.Tree[[]byte] {
+	active := effectiveKeys(effects)
+	if active <= 1 || original.Len() == 0 && active < 4 {
+		return applyEffectsSequential(original, effects)
+	}
+	edits := make([]tree.Edit[[]byte], 0, active)
+	for _, effect := range effects {
+		if effect.insert || effect.existed {
+			edits = append(
+				edits,
+				tree.Edit[[]byte]{
+					Version: effect.version,
+					Stamp:   effect.stamp,
+					Value:   effect.payload,
+					Insert:  effect.insert,
+				},
+			)
 		}
 	}
-	return candidate
+	return original.Apply(edits)
+}
+
+func effectiveKeys(effects []batchEffect) int {
+	active := 0
+	for _, effect := range effects {
+		if effect.insert || effect.existed {
+			active++
+		}
+	}
+	return active
+}
+
+func applyEffectsSequential(original tree.Tree[[]byte], effects []batchEffect) tree.Tree[[]byte] {
+	for _, effect := range effects {
+		if effect.insert {
+			original = original.Insert(effect.version, effect.payload)
+		} else if effect.existed {
+			original = original.Forget(effect.version, effect.stamp)
+		}
+	}
+	return original
 }
 
 type batchEffect struct {
