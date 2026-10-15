@@ -101,9 +101,9 @@ func TestBatchRollbackAndAtomicPublish(t *testing.T) {
 
 func TestCodecAdmissionRollback(t *testing.T) {
 	codec := JSONCodec[string]()
-	decode := codec.Decode
-	codec.Decode = func(p []byte) (string, error) {
-		s, err := decode(p)
+	decode := codec.DecodeBounded
+	codec.DecodeBounded = func(p []byte, limit uint64) (string, error) {
+		s, err := decode(p, limit)
 		if s == "reject" {
 			return "", ErrCodec
 		}
@@ -222,7 +222,7 @@ func TestConcurrentSnapshotAndWrites(t *testing.T) {
 
 func TestUnfaithfulCodecRejected(t *testing.T) {
 	codec := JSONCodec[string]()
-	codec.Decode = func([]byte) (string, error) { return "other", nil }
+	codec.DecodeBounded = func([]byte, uint64) (string, error) { return "other", nil }
 	peer, err := Seed(codec)
 	if err != nil {
 		t.Fatal(err)
@@ -242,8 +242,8 @@ func TestUnfaithfulCodecRejected(t *testing.T) {
 
 func TestMalformedCodecRejected(t *testing.T) {
 	codec := Codec[string]{
-		Encode: func(string) ([]byte, error) { return []byte{1, 2}, nil },
-		Decode: func([]byte) (string, error) { return "value", nil },
+		Encode:        func(string) ([]byte, error) { return []byte{1, 2}, nil },
+		DecodeBounded: func([]byte, uint64) (string, error) { return "value", nil },
 	}
 	peer, err := Seed(codec)
 	if err != nil {

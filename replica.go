@@ -36,45 +36,37 @@ var (
 	ErrUnfaithful = errors.New("hearsay: payload does not survive codec round trip")
 )
 
-// DefaultPayloadDepthLimit bounds nested CBOR payload containers and tags.
+// DefaultPayloadDepthLimit bounds typed payload decoder recursion at admission.
 const DefaultPayloadDepthLimit = 256
 
 // Codec defines the owned CBOR representation of a payload. Functions must be
-// safe for concurrent calls. Encode and Decode must handle exactly one CBOR
-// item. Equal compares original and decoded values; nil uses reflect.DeepEqual.
-// The replica copies encoded buffers and gives Decode its own copy.
+// safe for concurrent calls. Encode and DecodeBounded handle exactly one CBOR
+// item. DecodeBounded enforces typed recursion under the supplied limit; tags
+// skipped by the type do not consume it. Equal defaults to reflect.DeepEqual.
+// The replica copies buffers and gives DecodeBounded an independent copy.
+// Readback uses an unlimited bound because stored payloads are already admitted.
 type Codec[T any] struct {
 	Encode            func(T) ([]byte, error)
-	Decode            func([]byte) (T, error)
+	DecodeBounded     func([]byte, uint64) (T, error)
 	Equal             func(T, T) bool
-	PayloadDepthLimit int
+	PayloadDepthLimit uint64
 }
 
 // BytesCodec stores opaque binary messages.
 func BytesCodec() Codec[[]byte] {
 	return Codec[[]byte]{Encode: func(p []byte) ([]byte, error) {
 		return append(cbor.AppendHead(nil, cbor.MajorBytes, uint64(len(p))), p...), nil
-	}, Decode: decodeBytes, Equal: bytes.Equal}
+	}, DecodeBounded: decodeBytesBounded, Equal: bytes.Equal}
 }
 
-func decodeBytes(p []byte) ([]byte, error) {
-	head, n, err := cbor.ParseHead(p)
-	if err != nil {
-		return nil, err
-	}
-	if head.Major != cbor.MajorBytes {
-		return nil, cbor.ErrMajor
-	}
-	if head.Value != uint64(len(p)-n) {
-		return nil, cbor.ErrMalformed
-	}
-	return p[n:], nil
+func decodeBytesBounded(p []byte, limit uint64) ([]byte, error) {
+	return cbor.DecodeByteStringBounded(p, limit)
 }
 
 // JSONCodec stores JSON inside a CBOR byte string and rejects trailing data.
 // Its wire payload type is a byte string containing JSON, rather than a CBOR map.
 func JSONCodec[T any]() Codec[T] {
-	return Codec[T]{Encode: encodeJSON[T], Decode: decodeJSON[T]}
+	return Codec[T]{Encode: encodeJSON[T], DecodeBounded: decodeJSON[T]}
 }
 
 func encodeJSON[T any](v T) ([]byte, error) {
@@ -85,9 +77,9 @@ func encodeJSON[T any](v T) ([]byte, error) {
 	return append(cbor.AppendHead(nil, cbor.MajorBytes, uint64(len(p))), p...), nil
 }
 
-func decodeJSON[T any](p []byte) (T, error) {
+func decodeJSON[T any](p []byte, limit uint64) (T, error) {
 	var v T
-	raw, err := decodeBytes(p)
+	raw, err := decodeBytesBounded(p, limit)
 	if err != nil {
 		return v, err
 	}
@@ -107,7 +99,15 @@ func decodeJSON[T any](p []byte) (T, error) {
 }
 
 func (c Codec[T]) encode(v T) ([]byte, error) {
-	if c.Encode == nil || c.Decode == nil {
+	limit := c.PayloadDepthLimit
+	if limit == 0 {
+		limit = DefaultPayloadDepthLimit
+	}
+	return c.encodeBounded(v, limit)
+}
+
+func (c Codec[T]) encodeBounded(v T, limit uint64) ([]byte, error) {
+	if c.Encode == nil || c.DecodeBounded == nil {
 		return nil, ErrCodec
 	}
 	p, err := c.Encode(v)
@@ -115,18 +115,10 @@ func (c Codec[T]) encode(v T) ([]byte, error) {
 		return nil, fmt.Errorf("hearsay: encode payload: %w", err)
 	}
 	owned := bytes.Clone(p)
-	limit := c.PayloadDepthLimit
-	if limit == 0 {
-		limit = DefaultPayloadDepthLimit
-	}
-	if err := cbor.ValidateItem(owned, cbor.Limits{
-		MaxDepth: limit,
-		MaxBytes: max(1, len(owned)),
-		MaxItems: max(1, len(owned)),
-	}); err != nil {
+	if err := cbor.ValidateWellFormed(owned); err != nil {
 		return nil, fmt.Errorf("hearsay: admit CBOR payload: %w", err)
 	}
-	decoded, err := c.Decode(bytes.Clone(owned))
+	decoded, err := c.DecodeBounded(bytes.Clone(owned), limit)
 	if err != nil {
 		return nil, fmt.Errorf("hearsay: admit payload: %w", err)
 	}
@@ -142,7 +134,7 @@ func (c Codec[T]) encode(v T) ([]byte, error) {
 	return owned, nil
 }
 
-func (c Codec[T]) decode(p []byte) (T, error) { return c.Decode(bytes.Clone(p)) }
+func (c Codec[T]) decode(p []byte) (T, error) { return c.DecodeBounded(bytes.Clone(p), ^uint64(0)) }
 
 type published struct {
 	tree    tree.Tree[[]byte]
@@ -193,7 +185,7 @@ func Seed[T any](codec Codec[T]) (*Peer[T], error) { return SeedFrom(rand.Reader
 // SeedFrom reads the network identifier from entropy. Use a cryptographically
 // secure source in production; repeated identifiers violate network isolation.
 func SeedFrom[T any](entropy io.Reader, codec Codec[T]) (*Peer[T], error) {
-	if codec.Encode == nil || codec.Decode == nil {
+	if codec.Encode == nil || codec.DecodeBounded == nil {
 		return nil, ErrCodec
 	}
 	var network Network

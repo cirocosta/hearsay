@@ -9,9 +9,9 @@ import (
 
 func TestPayloadAdmissionDoesNotImposeScannerDefaultCaps(t *testing.T) {
 	codec := Codec[[]byte]{
-		Encode: func(p []byte) ([]byte, error) { return p, nil },
-		Decode: func(p []byte) ([]byte, error) { return p, nil },
-		Equal:  bytes.Equal,
+		Encode:        func(p []byte) ([]byte, error) { return p, nil },
+		DecodeBounded: func(p []byte, _ uint64) ([]byte, error) { return p, nil },
+		Equal:         bytes.Equal,
 	}
 	t.Run("more than one million items", func(t *testing.T) {
 		const count = 1_000_001
