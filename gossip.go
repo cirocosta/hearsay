@@ -131,6 +131,7 @@ type BootstrapConfig[T any] struct {
 	bookmarkLimit   int
 	observers       observe.Attachment
 	sessionDeadline *time.Duration
+	gossipWhen      GossipWhen[T]
 }
 
 // Bootstrap configures joining a network through any established peer.
@@ -236,6 +237,7 @@ func (b *BootstrapConfig[T]) joinSession(
 	peer.state.settings = b.settings
 	peer.state.observers = b.observers
 	peer.state.sessionDeadline = b.sessionDeadline
+	peer.state.gossipWhen = b.gossipWhen
 	return peer, nil
 }
 

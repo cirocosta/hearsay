@@ -156,6 +156,7 @@ type replica[T any] struct {
 	bookmarkLimit   int
 	observers       observe.Attachment
 	sessionDeadline *time.Duration
+	gossipWhen      GossipWhen[T]
 	done            chan struct{}
 	ended           bool
 }

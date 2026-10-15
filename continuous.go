@@ -22,8 +22,9 @@ const (
 
 // GossipOptions configures one continuous connection driver.
 type GossipOptions[T any] struct {
-	// When creates this connection's request stream. Nil selects the default:
-	// synchronize immediately, then after local or learned frontier changes.
+	// When overrides this connection's initiation factory. Nil inherits the
+	// peer's factory, which normally synchronizes immediately, then after local
+	// or learned frontier changes.
 	// The factory must return promptly; its goroutines must honor ctx. A nil
 	// returned channel disables local initiation. Closing the channel ends the
 	// driver after its active exchange. Remote initiation remains independent.
@@ -69,9 +70,13 @@ func (r *Rumors[T]) Gossip(
 			duration := *options.SessionDeadline
 			driver.deadline = &duration
 		}
+		when := hold.state.configuredGossipWhen()
 		if options.When != nil {
+			when = options.When
+		}
+		if when != nil {
 			driver.custom = true
-			driver.requests = options.When(policyCtx, driver.changes)
+			driver.requests = when(policyCtx, driver.changes)
 		}
 		driver.drive(ctx, yield)
 	}
