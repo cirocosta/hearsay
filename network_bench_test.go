@@ -138,6 +138,7 @@ func BenchmarkSessionNetwork(b *testing.B) {
 	}
 	cases := []networkCase{
 		{name: "divergent100k", shared: 100_000, delta: 10_000, payload: 1024},
+		{name: "floor1k", shared: 1000, delta: 100, payload: 1024},
 		{name: "sparse100k", shared: 100_000, delta: 1, payload: 1024, sparse: true},
 		{name: "disjoint10k", delta: 10_000, payload: 1024},
 		{name: "redactions100k", shared: 100_000, delta: 10_000, payload: 1024, redactions: true},
@@ -172,7 +173,14 @@ func BenchmarkSessionNetwork(b *testing.B) {
 }
 
 func includeNetworkCase(c networkCase, p networkProfile, budget uint64) bool {
+	if c.name == "floor1k" {
+		return (p.name == "WAN100ms1G" || p.name == "WAN20ms100M") &&
+			(budget == 0 || budget == 1<<20)
+	}
 	if c.name == "divergent100k" {
+		if p.name == "WAN100ms1G" || p.name == "WAN20ms100M" {
+			return budget >= 16<<20
+		}
 		return true
 	}
 	if budget != 0 && budget != DefaultSyncMemoryBudget {
@@ -184,7 +192,7 @@ func includeNetworkCase(c networkCase, p networkProfile, budget uint64) bool {
 	if c.sparse {
 		return p.name == "CPU" || p.name == "WAN100ms1G"
 	}
-	return p.name == "WAN100ms1G"
+	return budget == DefaultSyncMemoryBudget && p.name == "WAN100ms1G"
 }
 
 func networkActor(

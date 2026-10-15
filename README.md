@@ -27,6 +27,12 @@ network access; ordinary Go tests do not. See [interop/README.md](interop/README
 for the configuration matrix and [PERFORMANCE.md](PERFORMANCE.md) for measured
 gains and tradeoffs.
 
+The regular network benchmark matrix keeps each session within a one-minute
+deadline. It tests the one-slot floor on a 1,000-message set with 100 new
+messages per side over a 100 ms link. The 100,000-message case retains floor
+coverage on CPU and 1 ms links. Large sets at the floor over 20-100 ms links
+are stress workloads and are excluded from the regular matrix.
+
 For a local replica:
 
 ```go
