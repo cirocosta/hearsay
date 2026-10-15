@@ -193,10 +193,15 @@ func SeedFrom[T any](entropy io.Reader, codec Codec[T]) (*Peer[T], error) {
 		return nil, ErrCodec
 	}
 	var network Network
-	if _, err := io.ReadFull(entropy, network[:]); err != nil {
-		return nil, fmt.Errorf("hearsay: network entropy: %w", err)
+	for range 2 {
+		if _, err := io.ReadFull(entropy, network[:]); err != nil {
+			return nil, fmt.Errorf("hearsay: network entropy: %w", err)
+		}
+		if network != (Network{}) {
+			return newPeer(network, before.SeedParty(), tree.Tree[[]byte]{}, codec), nil
+		}
 	}
-	return newPeer(network, before.SeedParty(), tree.Tree[[]byte]{}, codec), nil
+	return nil, errors.New("hearsay: entropy repeatedly produced reserved zero network")
 }
 
 func newPeer[T any](
