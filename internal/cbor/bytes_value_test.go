@@ -7,8 +7,7 @@ import (
 )
 
 func TestDecodeByteStringCiboriumCorpus(t *testing.T) {
-	// These verdicts are pinned by the exact upstream Ciborium 0.2.2,
-	// bytes 1.11.1, and serde 1.0.228 oracle in .agi.local/payload-depth.
+	// these verdicts come from Ciborium 0.2.2, bytes 1.11.1, and serde 1.0.228.
 	tests := []struct{ hex, want string }{
 		{"40", ""},
 		{"4100", "00"},

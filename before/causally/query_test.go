@@ -162,6 +162,8 @@ func TestQueryCoverageAgainstExhaustiveLattice(t *testing.T) {
 			}
 		}
 	}
+	// golden verdicts cover 51,030 bytes from nine two-coordinate versions,
+	// their ordered spans, and fourteen query forms at each bound pair.
 	const upstream = "ad85933cff1c00fd20794c376e35ec15479456f7a45b289ee9176e56582d5554"
 	if got := fmt.Sprintf("%x", sha256.Sum256(oracle)); got != upstream {
 		t.Fatalf("Rust query oracle digest %s, want %s", got, upstream)

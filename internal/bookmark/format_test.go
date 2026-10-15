@@ -133,8 +133,7 @@ func TestAlternateEnvelope(t *testing.T) {
 }
 
 func TestRustTypedEnvelopeSpellings(t *testing.T) {
-	// Verified against Ciborium 0.2.2 with the original upstream Complete
-	// adapter in .agi.local/payload-depth/src/bin/bookmark-format.rs.
+	// verified against Ciborium 0.2.2 with the upstream Complete adapter.
 	canonical := unhex(t, emptyFixture)
 	for _, tc := range []struct {
 		name   string

@@ -43,8 +43,8 @@ func TestWireRustExhaustiveAcceptance(t *testing.T) {
 	}
 }
 
-// These vectors were emitted by the pinned upstream before crate using
-// .agi.local/wire-oracle. Clock encodings pin the byte boundary between fields.
+// these vectors were emitted by the upstream before crate. Clock encodings
+// pin the byte boundary between fields.
 func TestWireRustGolden(t *testing.T) {
 	c := Seed()
 	check := func(name, party, version, clock string) {
