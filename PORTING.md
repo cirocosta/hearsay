@@ -76,6 +76,10 @@ following checks provide direct evidence rather than relying on source presence:
   bootstrap, retirement, concurrent mutation, deadlines, inherited policies,
   bookmark write ordering, recovery, and cancellation. `testdata/batch_semantics`
   records upstream final-effect behavior for repeated and canceled actions.
+- Public external-package tests check typed mismatch operands, error provenance,
+  operation/phase/directed-stream context, and preservation of the first causal
+  write or flush failure. Wire observation and statistics tests verify exact
+  item boundaries, data-only counters, elapsed time, and terminal callbacks.
 - `conformance` supplies reusable link and bookmark checks. `link/routed` tests
   real sockets, stream completion, cancellation callback ownership, reuse,
   bounded admission, and teardown.
@@ -86,9 +90,22 @@ following checks provide direct evidence rather than relying on source presence:
   ordinary Go tests do not require Rust or network access.
 - [PERFORMANCE.md](PERFORMANCE.md) records retained and rejected trials, repeated
   measurements, allocation changes, workload limits, and reproducible commands.
+- Calibrated full-session fixtures cover RTT, bandwidth, overlap, payloads, and
+  budgets. Independent byte-credit/FIFO tests cover 307,200 operations. Opt-in
+  queue and session memory diagnostics distinguish queue ownership, result
+  custody, transport storage, and the progress floor from total resident memory.
 
-The completion audit remains open while size-aware window pricing, representative
-RTT/bandwidth and transient-memory evidence, and final public-error and routed
-overflow checks are being completed. Run `make check` and the real interop matrix
-again after those changes. The full requirements above remain the acceptance
-contract.
+The final requirements audit found no remaining blocker. On 2026-10-14,
+`make check` passed all Go tests, race checks, vet, and lint. The real Rust
+matrix passed default, each endpoint at minimum, both endpoints at minimum with
+the Go race detector, Go budgets of 16 MiB and 16 KiB (the latter with race),
+and empty providers. All seven cases ran both provider languages and the full
+lifecycle, 270 sessions with data-bearing epoch wrap, and READY reuse with no
+fresh data dials. Tracked Go and interoperability source checksums remained
+identical throughout that final matrix.
+
+These checks establish the recorded acceptance evidence; they do not prove
+equivalence for every possible schedule or payload type. Custom codecs must
+implement their typed recursion contract. Memory and performance limits are
+documented in [PERFORMANCE.md](PERFORMANCE.md). The requirements above remain
+the regression contract for later changes.

@@ -42,8 +42,9 @@ boundaries so read-ahead bytes remain available.
 
 Every session previously allocated all 34 queue buffers at their maximum
 negotiated width. The retained implementation grows wider queues with actual
-occupancy and keeps native channels for one-slot windows. Queue capacities,
-memory pricing, wire bytes, and stream counts remain the same.
+occupancy and keeps native channels for one-slot windows. This first experiment
+held queue capacities, memory pricing, wire bytes, and stream counts constant.
+The later byte-credit experiment below changes window pricing separately.
 
 The same host and affinity settings apply. Fixed binaries used identical
 fixtures: 100 or 10,000 initial messages, 1 or 100 sends or redactions, 32-byte
@@ -224,3 +225,65 @@ fixtures. The regular matrix uses smaller long-RTT floor fixtures to stay within
 its session deadline. Raw samples, binary hashes, source overlays, memory logs,
 and the full eleven-case comparison remain in `.agi.local/perf/`, with the
 analysis in `WINDOW_RESULTS.md`.
+
+## Atomic batches
+
+Atomic batches now apply sorted distinct final effects in one persistent trie
+traversal and retain untouched subtrees. A profile attributed 85.6% of sampled
+CPU time to branch construction, with 56.9% flat in SHA3 hashing. Rebuilding each
+changed fan once removes repeated work without rebuilding the whole tree.
+
+Matching fixed binaries compared against the corrected per-key history baseline.
+Four alternating samples screened the change; four reversed-order samples
+confirmed it. A boundary experiment then selected the original sequential path
+for one effective key and empty-tree batches below four effective keys. Four
+further samples per variant validated the final dispatch directly against the
+original baseline, with Go 1.27.1, CPU 2, and `GOMAXPROCS=1`.
+
+Final public API medians at 10,000 resident messages:
+
+| Batch  | Actions | Original ms/op | Retained ms/op | Original B/op | Retained B/op |
+| ------ | ------: | -------------: | -------------: | ------------: | ------------: |
+| Send   |     512 |         17.455 |          2.913 |     2,268,180 |       628,720 |
+| Redact |     512 |         15.692 |          2.168 |     1,769,282 |       372,352 |
+| Mixed  |     512 |         16.986 |          2.602 |     2,017,050 |       506,472 |
+
+These public batches include admission, locking, and publication. Fixture and
+survivor-oracle construction and snapshot reset are outside timing. The final
+large-batch reductions are 83-86%. The nonempty two-send kernel improves 34.6%.
+The empty-tree two-send kernel retains baseline 1,216 B and 21 allocations but
+has a 1.7% slower median (4,835 versus 4,752 ns). Single-action paths retain
+identical allocations; earlier guards ranged from 1.3% slower to 1.0% faster.
+
+Rust final-effect fixtures, an independent distinct-edit oracle, canonical shape,
+causal bounds, snapshot sharing, missing/older deletions, duplicate rejection,
+review, and repeated races pass. These are local CPU batch results, not network
+throughput measurements. Build `go test -c .` and compare `BenchmarkApplyBatch`
+and `BenchmarkAtomicBatchAPI` with identical fixtures. Raw trials, profiles,
+source/binary hashes, and all boundary tables remain in `.agi.local/perf/batch/`.
+
+## Rejected result-aggregation trial
+
+A full-session allocation profile showed repeated replacement of individual
+result leaves rebuilding shared trie ancestry. A local prototype collected at
+most 64 consecutive, distinct, previously absent leaf scopes, then applied them
+with the bulk traversal. Empty, nonleaf, resident, and duplicate-address edits
+flushed the batch and retained ordered replacement semantics. Independent review
+and ordered-edit, payload-ownership, cancellation, one-slot producer, one-byte,
+and zero-target correctness checks passed. Production retains sequential result
+aggregation.
+
+The bounded trial used matching fixed binaries, an ABBA order, eight samples per
+variant, Go 1.27.1, `GOMAXPROCS=4`, and CPUs 2,4,6,8. This is a separate runtime
+configuration from the single-thread experiments above. On the divergent
+100,000-message CPU fixture, floor-budget medians changed from 898.065 to
+587.677 ms and default-budget medians from 662.388 to 436.903 ms. Allocation
+fell 15.58% and 14.28%, respectively. Wire bytes were unchanged.
+
+The equal-100,000/default guard changed from 129.876 to 139.798 us (+7.64%),
+exceeding the predeclared 3% median timing guard. That path skips aggregation;
+the result is noisy (`p = .442`) and does not establish a causal regression.
+The trial was nevertheless rejected under its fixed decision rule, without
+reruns or production changes. Sparse, tiny, redaction, and bulk guards met the
+timing bound. Prototype source, exact medians, binary hashes, profiles, and the
+score script remain under `.agi.local/perf/aggregate/` for future investigation.
