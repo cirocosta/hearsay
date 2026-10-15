@@ -33,6 +33,7 @@ type SessionState struct {
 // A clean session releases the transport for its next session.
 type Managed struct {
 	transport Link
+	control   *controlReader
 	mu        sync.Mutex
 	epoch     uint8
 	poisoned  bool
@@ -47,7 +48,7 @@ func Manage(transport Link) *Managed {
 	if transport == nil {
 		panic("nil link transport")
 	}
-	return &Managed{transport: transport}
+	return &Managed{transport: transport, control: newControlReader(transport.Control())}
 }
 
 // State returns the next epoch and current poison latch.
@@ -83,7 +84,11 @@ func (m *Managed) Begin(ctx context.Context) (*Session, error) {
 }
 
 func (m *Managed) closeTransport() error {
-	m.closeOnce.Do(func() { m.closeErr = m.transport.Close() })
+	m.closeOnce.Do(func() {
+		m.control.close()
+		m.closeErr = m.transport.Close()
+		m.control.wait()
+	})
 	return m.closeErr
 }
 
@@ -230,10 +235,7 @@ func (s *Session) Close() error {
 type sessionControl struct{ session *Session }
 
 func (c *sessionControl) Read(b []byte) (int, error) {
-	if err := c.session.check(); err != nil {
-		return 0, err
-	}
-	return c.session.owner.transport.Control().Read(b)
+	return c.session.ReadControlContext(c.session.ctx, b)
 }
 
 func (c *sessionControl) Write(b []byte) (int, error) {
@@ -243,6 +245,12 @@ func (c *sessionControl) Write(b []byte) (int, error) {
 	return c.session.owner.transport.Control().Write(b)
 }
 func (c *sessionControl) Close() error { return c.session.Close() }
+func (c *sessionControl) Flush() error {
+	if err := c.session.check(); err != nil {
+		return err
+	}
+	return Flush(c.session.owner.transport.Control())
+}
 
 // Completer marks the exact clean end of a data stream. Reusing transports may
 // implement it to recover connections without relying on EOF or reading past
