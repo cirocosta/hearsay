@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/cirocosta/hearsay/before"
 	"github.com/cirocosta/hearsay/internal/cbor"
@@ -143,19 +144,20 @@ type published struct {
 }
 
 type replica[T any] struct {
-	mu            sync.Mutex
-	network       Network
-	party         *before.Party
-	codec         Codec[T]
-	current       atomic.Pointer[published]
-	generation    *generation
-	settings      SynchronizationSettings
-	reservations  uint64
-	bookmark      *peerBookmark
-	bookmarkLimit int
-	observers     observe.Attachment
-	done          chan struct{}
-	ended         bool
+	mu              sync.Mutex
+	network         Network
+	party           *before.Party
+	codec           Codec[T]
+	current         atomic.Pointer[published]
+	generation      *generation
+	settings        SynchronizationSettings
+	reservations    uint64
+	bookmark        *peerBookmark
+	bookmarkLimit   int
+	observers       observe.Attachment
+	sessionDeadline *time.Duration
+	done            chan struct{}
+	ended           bool
 }
 
 type generation struct {

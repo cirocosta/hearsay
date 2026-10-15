@@ -134,11 +134,12 @@ func phaseError(phase string, err error) error {
 // BootstrapConfig retains payload and synchronization settings across retries.
 // Copies can make independent attempts when no bookmark storage is attached.
 type BootstrapConfig[T any] struct {
-	codec         Codec[T]
-	settings      SynchronizationSettings
-	bookmark      *bootstrapBookmark
-	bookmarkLimit int
-	observers     observe.Attachment
+	codec           Codec[T]
+	settings        SynchronizationSettings
+	bookmark        *bootstrapBookmark
+	bookmarkLimit   int
+	observers       observe.Attachment
+	sessionDeadline *time.Duration
 }
 
 // Bootstrap configures joining a network through any established peer.
@@ -171,12 +172,19 @@ func (b *BootstrapConfig[T]) Join(ctx context.Context, carrier *link.Managed) (J
 	}
 	joinedSuccessfully := false
 	defer func() { b.finishBookmarkJoin(joinedSuccessfully) }()
-	session, err := beginSession(ctx, carrier)
+	activeCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	session, err := beginSession(activeCtx, carrier)
 	if err != nil {
 		return retry, err
 	}
 	defer func() { _ = session.Close() }()
-	peer, err := b.joinSession(ctx, session)
+	peer, err := runSessionDeadline(
+		activeCtx,
+		b.sessionDeadline,
+		cancel,
+		func() (*Peer[T], error) { return b.joinSession(activeCtx, session) },
+	)
 	if err != nil {
 		return retry, err
 	}
@@ -236,6 +244,7 @@ func (b *BootstrapConfig[T]) joinSession(
 	peer = newPeer(Network(remote.Network), donated, content.Tree, codec)
 	peer.state.settings = b.settings
 	peer.state.observers = b.observers
+	peer.state.sessionDeadline = b.sessionDeadline
 	return peer, nil
 }
 
@@ -266,13 +275,16 @@ func (r *Rumors[T]) GossipOnce(ctx context.Context, carrier *link.Managed) (Goss
 		return Gossiped{}, err
 	}
 	defer func() { _ = hold.Close() }()
-	session, err := beginSession(ctx, carrier)
+	activeCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	session, err := beginSession(activeCtx, carrier)
 	if err != nil {
 		return Gossiped{}, err
 	}
 	defer func() { _ = session.Close() }()
 	started := time.Now()
-	result, _, err := hold.state.session(ctx, session, protocol.Remain)
+	outcome, err := hold.state.runConfiguredSession(activeCtx, session, protocol.Remain, cancel)
+	result := outcome.gossiped
 	result.Elapsed = time.Since(started)
 	return result, err
 }
@@ -300,12 +312,15 @@ func (p *Peer[T]) Retire(ctx context.Context, carrier *link.Managed) RetireResul
 			Err:    err,
 		}
 	}
-	session, err := beginSession(ctx, carrier)
+	activeCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	session, err := beginSession(activeCtx, carrier)
 	if err != nil {
 		return recoverPeer(err, RetirementRecovered)
 	}
 	defer func() { _ = session.Close() }()
-	_, donated, err := s.session(ctx, session, protocol.Retire)
+	outcome, err := s.runConfiguredSession(activeCtx, session, protocol.Retire, cancel)
+	donated := outcome.donated
 	if donated {
 		s.mu.Lock()
 		s.finishLocked()
