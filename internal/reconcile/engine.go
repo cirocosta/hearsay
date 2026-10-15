@@ -62,7 +62,7 @@ type engine struct {
 	local, remote                          protocol.Greeting
 	role                                   protocol.Role
 	options                                Options
-	queues                                 [34]chan pending
+	queues                                 [34]pendingHandle
 	outputs                                [17]chan replyBatch
 	outputDone                             [17]chan struct{}
 	edits                                  chan tree.Scope[[]byte]
@@ -163,7 +163,7 @@ func (e *engine) initQueues() {
 		first = 2
 	}
 	for depth := first; depth < 34; depth += 2 {
-		e.queues[depth] = make(chan pending, int(slots))
+		e.queues[depth] = newPendingHandle(int(slots))
 	}
 }
 
@@ -260,15 +260,10 @@ func (e *engine) publish(scope tree.Scope[[]byte]) error {
 }
 
 func (e *engine) enqueue(depth int, q pending) error {
-	if depth >= 34 || e.queues[depth] == nil {
+	if depth >= 34 || !e.queues[depth].initialized() {
 		return fmt.Errorf("%w: question beyond terminal height", ErrReply)
 	}
-	select {
-	case e.queues[depth] <- q:
-		return nil
-	case <-e.ctx.Done():
-		return e.ctx.Err()
-	}
+	return e.queues[depth].push(e.ctx, q)
 }
 
 func (e *engine) startInitiator() {
@@ -278,7 +273,7 @@ func (e *engine) startInitiator() {
 	}
 	root, _ := e.original.Scope(nil)
 	e.launch(func() error {
-		defer close(e.queues[1])
+		defer e.queues[1].close()
 		return e.enqueue(1, pending{scope: root, fan: root.Children()})
 	})
 	e.launch(func() error {
@@ -295,7 +290,7 @@ func (e *engine) startResponder() {
 		e.launch(func() error { return e.stage(d) })
 	}
 	e.launch(func() error {
-		defer close(e.queues[2])
+		defer e.queues[2].close()
 		root, _ := e.original.Scope(nil)
 		if err := e.answer(root, e.remote.Listing, 0); err != nil {
 			return err
@@ -307,19 +302,22 @@ func (e *engine) startResponder() {
 
 func (e *engine) stage(depth int) error {
 	next := depth + 2
-	if next < 34 && e.queues[next] != nil {
-		defer close(e.queues[next])
+	if next < 34 && e.queues[next].initialized() {
+		defer e.queues[next].close()
 	}
 	incoming := incomingStream(depth, e.role)
-	for q := range e.queues[depth] {
-		if err := e.ctx.Err(); err != nil {
+	for {
+		q, ok, err := e.queues[depth].pop(e.ctx)
+		if err != nil {
 			return err
+		}
+		if !ok {
+			return e.finishStage(depth, incoming)
 		}
 		if err := e.resolve(q, depth, incoming); err != nil {
 			return err
 		}
 	}
-	return e.finishStage(depth, incoming)
 }
 
 func incomingStream(depth int, role protocol.Role) uint8 {
