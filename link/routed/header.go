@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+
+	"github.com/cirocosta/hearsay/link"
 )
 
 const (
@@ -39,7 +41,14 @@ func writeHeader(w io.Writer, kind byte, token Token, address []byte) error {
 		n++
 		n += copy(b[n:], address)
 	}
-	return writeAll(w, b[:n])
+	return writeRouting(w, b[:n])
+}
+
+func writeRouting(w io.Writer, b []byte) error {
+	if err := writeAll(w, b); err != nil {
+		return err
+	}
+	return link.Flush(w)
 }
 
 func writeAll(w io.Writer, b []byte) error {

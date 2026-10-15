@@ -198,3 +198,7 @@ type (
 	reader struct{ *stream }
 	writer struct{ *stream }
 )
+
+func flushConnection(conn net.Conn) error { return link.Flush(conn) }
+func (c *control) Flush() error           { return flushConnection(c.Conn) }
+func (s *stream) Flush() error            { return flushConnection(s.Conn) }

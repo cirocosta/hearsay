@@ -205,7 +205,7 @@ func (e *Endpoint) routeLink(conn net.Conn, h header) {
 			_ = l.Close()
 		}
 	}()
-	if err := writeAll(conn, []byte{ack}); err != nil {
+	if err := writeRouting(conn, []byte{ack}); err != nil {
 		e.routingFailures.Add(1)
 		return
 	}
@@ -364,3 +364,5 @@ func (e *Endpoint) Close() error { e.shutdown(net.ErrClosed); e.workers.Wait(); 
 // trackedConn gives every admitted connection a comparable registry identity,
 // including caller-supplied net.Conn values with noncomparable fields.
 type trackedConn struct{ net.Conn }
+
+func (c *trackedConn) Flush() error { return flushConnection(c.Conn) }
