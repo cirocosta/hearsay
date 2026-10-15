@@ -72,7 +72,7 @@ Build with `go test -c ./internal/reconcile`. The `BenchmarkRun` hierarchy
 records initial set size, divergence, operation, payload size, and budget.
 Run fixed binaries with `GOMAXPROCS=1 taskset -c 2`, `-test.benchmem`, and
 `-test.benchtime=75ms`. Compare the retained source against the eager queues
-before `23d7a95`; keep all benchmark fixtures identical. Raw local samples,
+before the lazy-storage change; keep all benchmark fixtures identical. Raw local samples,
 source overlays, environment records, and binary hashes are retained under
 `.agi.local/perf/`.
 
@@ -108,3 +108,42 @@ shutdown, and repeated public bootstrap/gossip. The real Rust verifier proves
 READY reuse and data-bearing epoch wrap in both provider directions. Build
 with `go test -c ./link/routed`; run `BenchmarkRoutedSessions` with the settings
 above and `-test.benchtime=150ms`.
+
+## Clock growth and fill
+
+A CPU and allocation profile of a fragmented identity attributed 54.5% of
+sampled CPU time and 69.2% of allocated objects to growth-route discovery.
+Packed route indices replace one heap object per visited identity branch.
+Unchanged fill subtrees also retain their pointers, which removes redundant
+leaf construction and equality walks.
+
+The first arena candidate improved fragmented clocks but slowed seed ticks by
+12.2%; it was rejected. Moving arena storage into a separate partial-identity
+helper restored the seed path. A separate trial then added fill sharing. The
+three variants used identical fixtures and four balanced screen samples each.
+The final candidate was compared directly with the original implementation in
+eight further samples per variant, one second per case, with the same pinned
+CPU and quiet-host rules above.
+
+| Tick topology          | Original ns/op | Retained ns/op | Original B/op | Retained B/op | Original allocs/op | Retained allocs/op |
+| ---------------------- | -------------: | -------------: | ------------: | ------------: | -----------------: | -----------------: |
+| Seed                   |         30.270 |         28.065 |            48 |            48 |                  1 |                  1 |
+| Unary depth 1          |        146.400 |         75.795 |           208 |            96 |                  5 |                  2 |
+| Unary depth 8          |        757.350 |        334.650 |           992 |           432 |                 26 |                  9 |
+| Unary depth 64         |        6,931.5 |        3,249.5 |         7,264 |         3,120 |                194 |                 65 |
+| Unary depth 256        |         28,787 |         14,310 |        28,768 |        15,408 |                770 |                259 |
+| Fragmented 16 regions  |          1,287 |         389.15 |         1,312 |           288 |                 48 |                  6 |
+| Fragmented 128 regions |         10,069 |          2,429 |         9,456 |         3,504 |                367 |                 11 |
+
+Seed ticks improve by 7.3%, unary cases by 48-56%, and fragmented cases by
+70-76%. At 10,000 resident messages, tree insertion and one-insert joins improve
+by 0.5% and 0.3%. The one-redaction join guard slows by 1.17% (`p = .021`),
+below the predeclared 3% guard limit. Its allocation counts remain unchanged.
+These are kernel results, not a complete-session speedup claim.
+
+Correctness gates include the pinned Rust clock replay, wide counts, deep
+decoded atoms, tree/race tests, and an independent two-coordinate fill/grow
+oracle. Build `go test -c ./before` and `go test -c ./internal/tree`; compare
+`BenchmarkTickSeed`, `BenchmarkTickTopology`, `BenchmarkInsert`, and the
+`BenchmarkJoin/one-insert` and `one-redaction` guards. Source archives, binary
+hashes, raw trials, and benchstat output live under `.agi.local/perf/clocks/`.
