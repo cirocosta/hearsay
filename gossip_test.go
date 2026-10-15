@@ -83,8 +83,12 @@ func TestBootstrapGossipRedactionAndReuse(t *testing.T) {
 	}
 	near, far := managedPair(t)
 	left, right := gossipPair(t, a, b, near, far)
-	if left.Stats.StreamsOpened != 0 || right.Stats.StreamsOpened != 0 {
-		t.Fatal("equal frontier opened data streams")
+	for _, result := range []Gossiped{left, right} {
+		stats := result.Stats
+		stats.Elapsed = 0
+		if stats != (SessionStats{}) {
+			t.Fatalf("equal frontier counted data work: %+v", result.Stats)
+		}
 	}
 	if near.State().Poisoned || far.State().Poisoned {
 		t.Fatal("completed session poisoned link")

@@ -12,7 +12,11 @@
 // Transport stream labels and incomplete or rejected items are excluded.
 package observe
 
-import "github.com/cirocosta/hearsay/before"
+import (
+	"time"
+
+	"github.com/cirocosta/hearsay/before"
+)
 
 // Observer creates one optional handler for each session entered by a peer.
 // Implementations must support concurrent calls. Return nil to decline a session.
@@ -116,10 +120,17 @@ type StreamInfo struct {
 
 // Stats summarizes measured session traffic and reconciliation work.
 type Stats struct {
+	// Elapsed includes setup, reconciliation, identity transfer, and confirmed
+	// completion, excluding an idle continuous-gossip policy wait.
+	Elapsed                                    time.Duration
 	BytesSent, BytesReceived                   uint64
 	FramesSent, FramesReceived                 uint64
 	MessagesSent, MessagesGained, MessagesShed uint64
 	DisputedScopes, StreamsOpened              uint64
+	// WindowGranted reports configured capacity, not observed occupancy.
+	WindowGranted uint64
+	// WindowStalls is scheduling-dependent full-window pressure on arrival.
+	WindowStalls uint64
 }
 
 // OutcomeKind identifies a terminal session result.

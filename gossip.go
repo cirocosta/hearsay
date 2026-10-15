@@ -20,10 +20,9 @@ import (
 // SessionStats records reconciliation traffic and work on this endpoint.
 type SessionStats = reconcile.Stats
 
-type countedControl struct {
+type replayControl struct {
 	io.ReadWriteCloser
-	sent, received uint64
-	prefix         []byte
+	prefix []byte
 }
 
 type controlArrival struct {
@@ -31,23 +30,20 @@ type controlArrival struct {
 	err   error
 }
 
-func (c *countedControl) Read(p []byte) (int, error) {
+func (c *replayControl) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
 	if len(c.prefix) > 0 {
 		n := copy(p, c.prefix)
 		c.prefix = c.prefix[n:]
-		c.received += uint64(n)
 		return n, nil
 	}
 
-	n, err := c.ReadWriteCloser.Read(p)
-	c.received += uint64(n)
-	return n, err
+	return c.ReadWriteCloser.Read(p)
 }
 
-func (c *countedControl) watch(ctx context.Context, carrier *sessionWire) func() error {
+func (c *replayControl) watch(ctx context.Context, carrier *sessionWire) func() error {
 	watchCtx, cancel := context.WithCancel(ctx)
 	ready := make(chan controlArrival, 1)
 	go func() {
@@ -75,15 +71,9 @@ func (c *countedControl) watch(ctx context.Context, carrier *sessionWire) func()
 	}
 }
 
-func (c *countedControl) Write(p []byte) (int, error) {
-	n, err := c.ReadWriteCloser.Write(p)
-	c.sent += uint64(n)
-	return n, err
-}
-
 type sessionWire struct {
 	*link.Session
-	control     *countedControl
+	control     *replayControl
 	observation *observe.Session
 }
 
@@ -94,7 +84,7 @@ func beginSession(ctx context.Context, carrier *link.Managed) (*sessionWire, err
 	if err != nil {
 		return nil, err
 	}
-	return &sessionWire{Session: s, control: &countedControl{ReadWriteCloser: s.Control()}}, nil
+	return &sessionWire{Session: s, control: &replayControl{ReadWriteCloser: s.Control()}}, nil
 }
 
 // Led identifies the session trigger on this endpoint.
@@ -112,7 +102,8 @@ type Gossiped struct {
 	Converged Version
 	Led       Led
 	Stats     SessionStats
-	Elapsed   time.Duration
+	// Elapsed mirrors Stats.Elapsed for the full session.
+	Elapsed time.Duration
 }
 
 // SessionError identifies the phase that failed. Completion errors can follow
@@ -200,12 +191,12 @@ func (b *BootstrapConfig[T]) joinSession(
 	ctx context.Context,
 	session *sessionWire,
 ) (peer *Peer[T], err error) {
+	started := time.Now()
 	session.observation = b.observers.Begin(observe.Bootstrap)
 	var content reconcile.Result
 	defer func() {
 		stats := content.Stats
-		stats.BytesSent += session.control.sent
-		stats.BytesReceived += session.control.received
+		stats.Elapsed = time.Since(started)
 		finishWireObservation(
 			ctx,
 			session,
@@ -282,10 +273,8 @@ func (r *Rumors[T]) GossipOnce(ctx context.Context, carrier *link.Managed) (Goss
 		return Gossiped{}, err
 	}
 	defer func() { _ = session.Close() }()
-	started := time.Now()
 	outcome, err := hold.state.runConfiguredSession(activeCtx, session, protocol.Remain, cancel)
 	result := outcome.gossiped
-	result.Elapsed = time.Since(started)
 	return result, err
 }
 
@@ -352,12 +341,17 @@ func (s *replica[T]) session(
 	carrier *sessionWire,
 	intent protocol.Intent,
 ) (result Gossiped, donated bool, err error) {
+	started := time.Now()
 	kind := observe.Gossip
 	if intent == protocol.Retire {
 		kind = observe.Retire
 	}
 	carrier.observation = s.observers.Begin(kind)
-	defer func() { finishWireObservation(ctx, carrier, result, err) }()
+	defer func() {
+		result.Elapsed = time.Since(started)
+		result.Stats.Elapsed = result.Elapsed
+		finishWireObservation(ctx, carrier, result, err)
+	}()
 	remote, err := exchangePreamble(
 		carrier,
 		protocol.Preamble{Network: protocol.Network(s.network), Intent: intent},
@@ -369,10 +363,6 @@ func (s *replica[T]) session(
 		err = completeSession(carrier)
 		return Gossiped{
 			Converged: s.current.Load().tree.Latest(),
-			Stats: SessionStats{
-				BytesSent:     carrier.control.sent,
-				BytesReceived: carrier.control.received,
-			},
 		}, false, phaseError(
 			"completion",
 			err,
@@ -440,8 +430,6 @@ func (tx *sessionTransaction[T]) reconcile(ctx context.Context) (Gossiped, error
 	if err = tx.complete(ctx); err != nil {
 		return Gossiped{}, err
 	}
-	content.Stats.BytesSent += tx.carrier.control.sent
-	content.Stats.BytesReceived += tx.carrier.control.received
 	return Gossiped{Converged: converged, Led: LedLocal, Stats: content.Stats}, nil
 }
 
@@ -628,7 +616,7 @@ func writeItem(w io.Writer, p []byte) error {
 	return nil
 }
 
-func (c *countedControl) Flush() error {
+func (c *replayControl) Flush() error {
 	if flush, ok := c.ReadWriteCloser.(interface{ Flush() error }); ok {
 		return flush.Flush()
 	}

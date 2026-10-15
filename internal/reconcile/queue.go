@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 )
 
 var errQueueClosed = errors.New("reconcile: pending queue is closed")
@@ -26,8 +27,19 @@ func newPendingHandle(limit int) pendingHandle {
 func (q *pendingHandle) initialized() bool { return q.direct != nil || q.lazy != nil }
 
 func (q *pendingHandle) push(ctx context.Context, item pending) error {
+	return q.pushMeasured(ctx, item, nil)
+}
+
+func (q *pendingHandle) pushMeasured(
+	ctx context.Context,
+	item pending,
+	stalls *atomic.Uint64,
+) error {
 	if q.direct == nil {
-		return q.lazy.push(ctx, item)
+		return q.lazy.pushMeasured(ctx, item, stalls)
+	}
+	if stalls != nil && len(q.direct) == cap(q.direct) {
+		stalls.Add(1)
 	}
 	select {
 	case q.direct <- item:
@@ -84,28 +96,48 @@ func queueNotify(ready chan struct{}) {
 }
 
 func (q *pendingQueue) push(ctx context.Context, item pending) error {
+	return q.pushMeasured(ctx, item, nil)
+}
+
+func (q *pendingQueue) pushMeasured(
+	ctx context.Context,
+	item pending,
+	stalls *atomic.Uint64,
+) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		q.mu.Lock()
-		if q.closed {
-			q.mu.Unlock()
-			return errQueueClosed
+		done, err := q.tryPush(item, stalls)
+		stalls = nil
+		if done || err != nil {
+			return err
 		}
-		if q.size < q.limit {
-			q.insert(item)
-			q.mu.Unlock()
-			queueNotify(q.readable)
-			return nil
-		}
-		q.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-q.writable:
 		}
 	}
+}
+
+func (q *pendingQueue) tryPush(item pending, stalls *atomic.Uint64) (bool, error) {
+	q.mu.Lock()
+	if q.closed {
+		q.mu.Unlock()
+		return false, errQueueClosed
+	}
+	if q.size == q.limit {
+		if stalls != nil {
+			stalls.Add(1)
+		}
+		q.mu.Unlock()
+		return false, nil
+	}
+	q.insert(item)
+	q.mu.Unlock()
+	queueNotify(q.readable)
+	return true, nil
 }
 
 func (q *pendingQueue) insert(item pending) {

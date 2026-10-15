@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/cirocosta/hearsay/internal/protocol"
 	"github.com/cirocosta/hearsay/internal/tree"
@@ -36,10 +37,18 @@ type Options struct {
 
 // Stats counts data frames, excluding transport labels and control traffic.
 type Stats struct {
+	// Elapsed covers the full session when populated by the session driver.
+	Elapsed                                    time.Duration
 	BytesSent, BytesReceived                   uint64
 	FramesSent, FramesReceived                 uint64
 	MessagesSent, MessagesGained, MessagesShed uint64
 	DisputedScopes, StreamsOpened              uint64
+	// WindowGranted is the largest configured comparison capacity. Equal
+	// frontiers skip window derivation and report zero.
+	WindowGranted uint64
+	// WindowStalls counts pushes that observed a full comparison queue on
+	// arrival. It measures scheduling-dependent pressure, not wait duration.
+	WindowStalls uint64
 }
 
 // Result contains a coherent reconciled snapshot and its data-phase statistics.
@@ -71,6 +80,8 @@ type engine struct {
 	err                                    error
 	workers                                sync.WaitGroup
 	sent, gained, shed, disputed, received atomic.Uint64
+	windowGranted                          uint64
+	windowStalls                           atomic.Uint64
 }
 
 // Run reconciles immutable opening snapshots over independently flow-controlled
@@ -158,6 +169,7 @@ func (e *engine) initQueues() {
 	const scopePrice uint64 = 256*128 + 256
 	slots := e.options.MemoryBudget / (17 * scopePrice)
 	slots = max(1, min(slots, 4096))
+	e.windowGranted = slots
 	first := 1
 	if e.role == protocol.Responder {
 		first = 2
@@ -227,6 +239,8 @@ func (e *engine) run() (Result, error) {
 		MessagesGained: e.gained.Load(),
 		MessagesShed:   e.shed.Load(),
 		DisputedScopes: e.disputed.Load(),
+		WindowGranted:  e.windowGranted,
+		WindowStalls:   e.windowStalls.Load(),
 	}
 	return Result{Tree: result, Stats: stats}, nil
 }
@@ -263,7 +277,7 @@ func (e *engine) enqueue(depth int, q pending) error {
 	if depth >= 34 || !e.queues[depth].initialized() {
 		return fmt.Errorf("%w: question beyond terminal height", ErrReply)
 	}
-	return e.queues[depth].push(e.ctx, q)
+	return e.queues[depth].pushMeasured(e.ctx, q, &e.windowStalls)
 }
 
 func (e *engine) startInitiator() {

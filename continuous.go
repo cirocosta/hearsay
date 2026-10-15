@@ -218,7 +218,6 @@ func (d *continuousDriver[T]) localWake(start controlStart) gossipWake {
 }
 
 func (d *continuousDriver[T]) exchange(ctx context.Context, wake gossipWake) (Gossiped, error) {
-	started := time.Now()
 	activeCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	wire, err := beginSession(activeCtx, d.carrier)
@@ -231,7 +230,6 @@ func (d *continuousDriver[T]) exchange(ctx context.Context, wake gossipWake) (Go
 		err = errors.Join(ctx.Err(), err)
 	}
 	result.Led = wake.led
-	result.Elapsed = time.Since(started)
 	return result, err
 }
 

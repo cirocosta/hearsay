@@ -99,6 +99,7 @@ func TestWireObserversCaptureCompleteControlAndData(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = live.Close() }()
+	bootstrapStats := make([]observe.Stats, 0, 2)
 	for _, recorder := range []*wireRecorder{recorderA, recorderB} {
 		session := recorder.last(t)
 		session.mu.Lock()
@@ -110,29 +111,52 @@ func TestWireObserversCaptureCompleteControlAndData(t *testing.T) {
 				session.outcomes,
 			)
 		}
-		sent, received := uint64(0), uint64(0)
-		data := 0
+		sent, received, framesSent, framesReceived := uint64(0), uint64(0), uint64(0), uint64(0)
+		controls := 0
 		for _, item := range session.items {
+			if item.info.ID.Kind == observe.Control {
+				controls++
+				continue
+			}
 			if item.info.Direction == observe.Sent {
 				sent += uint64(len(item.bytes))
+				framesSent++
 			} else {
 				received += uint64(len(item.bytes))
-			}
-			if item.info.ID.Kind == observe.Data {
-				data++
+				framesReceived++
 			}
 		}
-		if data == 0 {
-			t.Fatal("bootstrap omitted data frames")
+		if controls == 0 || framesSent+framesReceived == 0 {
+			t.Fatal("bootstrap omitted observed control or data items")
 		}
-		if stats := session.outcomes[0].Stats; stats.BytesSent != sent ||
-			stats.BytesReceived != received {
-			t.Fatalf("observed bytes %d/%d differ from stats %+v", sent, received, stats)
+		stats := session.outcomes[0].Stats
+		if stats.Elapsed <= 0 {
+			t.Fatal("bootstrap elapsed omitted from observer statistics")
 		}
+		if stats.BytesSent != sent || stats.BytesReceived != received ||
+			stats.FramesSent != framesSent ||
+			stats.FramesReceived != framesReceived {
+			t.Fatalf(
+				"observed data %d/%d bytes %d/%d frames differ from stats %+v",
+				sent,
+				received,
+				framesSent,
+				framesReceived,
+				stats,
+			)
+		}
+		bootstrapStats = append(bootstrapStats, stats)
 		session.mu.Unlock()
 	}
-	gossipPair(t, source, live, near, far)
-	for _, recorder := range []*wireRecorder{recorderA, recorderB} {
+	if a, b := bootstrapStats[0], bootstrapStats[1]; a.BytesSent != b.BytesReceived ||
+		a.BytesReceived != b.BytesSent ||
+		a.FramesSent != b.FramesReceived ||
+		a.FramesReceived != b.FramesSent {
+		t.Fatalf("paired bootstrap data accounting differs: %+v %+v", a, b)
+	}
+	left, right := gossipPair(t, source, live, near, far)
+	results := []Gossiped{left, right}
+	for index, recorder := range []*wireRecorder{recorderA, recorderB} {
 		session := recorder.last(t)
 		session.mu.Lock()
 		if session.info.Kind != observe.Gossip || session.info.Protocol != observe.V2 ||
@@ -153,6 +177,16 @@ func TestWireObserversCaptureCompleteControlAndData(t *testing.T) {
 		}
 		if sent != 3 || received != 3 {
 			t.Fatalf("equal control items: sent=%d received=%d", sent, received)
+		}
+		returned := results[index]
+		if returned.Elapsed <= 0 || returned.Elapsed != returned.Stats.Elapsed ||
+			observe.Stats(returned.Stats) != session.outcomes[0].Stats {
+			t.Fatalf(
+				"full-session statistics differ: elapsed=%v returned=%+v observed=%+v",
+				returned.Elapsed,
+				returned.Stats,
+				session.outcomes[0].Stats,
+			)
 		}
 		session.mu.Unlock()
 	}
@@ -192,5 +226,53 @@ func TestRejectedPreambleIsNotObservedAsReceivedItem(t *testing.T) {
 	}
 	if len(session.outcomes) != 1 || session.outcomes[0].Kind != observe.Failed {
 		t.Fatalf("failed session outcomes: %+v", session.outcomes)
+	}
+}
+
+func TestContinuousWireObserverElapsedMatchesReturnedStatistics(t *testing.T) {
+	source := seededBytes(t)
+	peer := bootstrapBytes(t, source)
+	recorder := &wireRecorder{}
+	if err := peer.AttachObserver(recorder); err != nil {
+		t.Fatal(err)
+	}
+	live, err := peer.IntoRumors()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = live.Close() }()
+	near, far := managedPair(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	served := make(chan error, 1)
+	go func() { _, err := source.GossipOnce(ctx, far); served <- err }()
+	yielded := false
+	for result, err := range live.Gossip(ctx, near, GossipOptions[[]byte]{}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		yielded = true
+		session := recorder.last(t)
+		session.mu.Lock()
+		if len(session.outcomes) != 1 {
+			t.Fatalf("terminal observations: %+v", session.outcomes)
+		}
+		if result.Elapsed <= 0 || result.Elapsed != result.Stats.Elapsed ||
+			observe.Stats(result.Stats) != session.outcomes[0].Stats {
+			t.Fatalf(
+				"continuous elapsed differs: elapsed=%v returned=%+v observed=%+v",
+				result.Elapsed,
+				result.Stats,
+				session.outcomes[0].Stats,
+			)
+		}
+		session.mu.Unlock()
+		break
+	}
+	if !yielded {
+		t.Fatal("continuous driver omitted completed result")
+	}
+	if err := <-served; err != nil {
+		t.Fatal(err)
 	}
 }
