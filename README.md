@@ -65,7 +65,7 @@ make check    # tests, race detector, vet, and golangci-lint v2
 make bench    # local and network-model benchmarks
 ```
 
-See [the research swarm example](examples/autoresearch/README.md) for ten
-LLM agents that use Hearsay to negotiate and run parser optimization experiments.
+See [the shared Kanban worker example](examples/kanban/README.md) for a replicated
+member list and autonomous demo jobs over sparse gossip connections.
 
 Hearsay is inspired by Oxide's [rumors](https://github.com/oxidecomputer/rumors).
